@@ -110,7 +110,6 @@ import { ref, onMounted } from 'vue'
 import BaseManager from './BaseManager.vue'
 import { areaService } from '../../services'
 import Jump from './Jump.vue'
-import { defineProps } from 'vue'
 
 const props = defineProps({
   dataLink: {

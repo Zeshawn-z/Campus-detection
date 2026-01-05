@@ -23,19 +23,19 @@ const categoryLabelMap: Record<string, string> = {
 
 // 建筑数据管理类
 class BuildingDataManager {
-  private buildingAreas = new Map<number, {
+  private buildingAreas = ref(new Map<number, {
     areas: AreaItem[];
     loaded: boolean;
     loading: boolean;
     hasMore: boolean;
     page: number;
-  }>()
+  }>())
   
   private loadedBuildingIds = new Set<number>()
   
   // 初始化建筑数据
   initBuilding(buildingId: number) {
-    this.buildingAreas.set(buildingId, {
+    this.buildingAreas.value.set(buildingId, {
       areas: [],
       loaded: false,
       loading: false,
@@ -46,7 +46,7 @@ class BuildingDataManager {
   
   // 获取建筑数据
   getBuildingData(buildingId: number) {
-    return this.buildingAreas.get(buildingId)
+    return this.buildingAreas.value.get(buildingId)
   }
   
   // 更新建筑数据
@@ -59,7 +59,10 @@ class BuildingDataManager {
   }>) {
     const existing = this.getBuildingData(buildingId)
     if (existing) {
-      this.buildingAreas.set(buildingId, { ...existing, ...data })
+      // 创建新的 Map 触发响应式更新
+      const newMap = new Map(this.buildingAreas.value)
+      newMap.set(buildingId, { ...existing, ...data })
+      this.buildingAreas.value = newMap
     }
   }
   
@@ -85,7 +88,7 @@ class BuildingDataManager {
   }
   
   getAllData() {
-    return this.buildingAreas
+    return this.buildingAreas.value
   }
   
   getLoadedIds() {
@@ -338,6 +341,7 @@ const loadBuildingAreas = (buildingId: number, loadMore = false) => {
 const handleBuildingVisible = async (buildingId: number) => {
   if (!buildingManager.isMarkedAsLoaded(buildingId)) {
     await loadBuildingAreas(buildingId)
+
   }
 }
 
@@ -441,7 +445,7 @@ onMounted(() => {
   // 设置定期刷新数据的间隔
   fetchInterval = window.setInterval(() => {
     refreshLoadedBuildings()
-  }, 30000) // 每30秒刷新一次
+  }, 300000) // 每30秒刷新一次
   
   isFirstLoad.value = false
   
@@ -773,10 +777,6 @@ watch(buildings, () => {
   transition: all 0.3s ease;
 }
 
-.custom-select:hover,
-.custom-input:hover {
-  transform: translateY(-2px);
-}
 
 .search-icon {
   color: #64748b;
@@ -808,7 +808,6 @@ watch(buildings, () => {
 }
 
 .building-section:hover {
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
 }
 
@@ -919,10 +918,10 @@ watch(buildings, () => {
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   transform: translateY(0) scale(1);
   perspective: 1000px;
+  margin-bottom: 15px;
 }
 
 .card-animation:hover {
-  transform: translateY(-2px) scale(1.01);
   z-index: 1;
 }
 

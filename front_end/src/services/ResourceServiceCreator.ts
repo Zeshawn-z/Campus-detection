@@ -1,5 +1,4 @@
 import { resourceManager } from './ResourceManager.ts';
-import type { ResourceType } from './ResourceManager.ts';
 
 /**
  * 创建标准化API服务

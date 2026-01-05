@@ -62,7 +62,7 @@ export const areaCustomMethods = {
 // 建筑服务自定义方法
 export const buildingCustomMethods = {
   getBuildingAreas: (id: number) => 
-    customApiCall<AreaItem[]>(`/api/buildings/${id}/areas/`),
+    customApiCall<AreaItem[]>(`/api/buildings/${id}/areas/`, 'get', undefined, {}, true, 5 * 60 * 1000),
   
   // 新增：分页获取建筑区域
   getBuildingAreasPaginated: (id: number, page = 1, pageSize = 20) => 

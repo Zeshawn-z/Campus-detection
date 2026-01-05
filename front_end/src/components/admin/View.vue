@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { defineProps } from 'vue'
 import { ElMessage } from 'element-plus'
 import {View} from "@element-plus/icons-vue";
 

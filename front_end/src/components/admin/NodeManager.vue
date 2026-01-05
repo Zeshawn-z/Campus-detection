@@ -110,7 +110,6 @@ import { ref } from 'vue'
 import BaseManager from './BaseManager.vue'
 import { terminalService } from '../../services'
 import Jump from './Jump.vue'
-import {defineProps}  from 'vue'
 
 const props = defineProps({
   dataLink: {

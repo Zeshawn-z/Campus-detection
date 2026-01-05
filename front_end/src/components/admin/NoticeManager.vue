@@ -62,7 +62,6 @@
 import { ref, onMounted } from 'vue'
 import BaseManager from './BaseManager.vue'
 import { areaService } from '../../services'
-import { defineProps } from 'vue'
 import Jump from './Jump.vue'
 
 const props = defineProps({

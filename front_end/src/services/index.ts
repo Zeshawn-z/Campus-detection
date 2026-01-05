@@ -8,7 +8,6 @@ import {
 
 // 导入资源管理器
 import { resourceManager } from './ResourceManager.ts';
-import type { ResourceType } from './ResourceManager.ts';
 
 // 导入创建资源服务工厂函数
 import { createResourceService } from './ResourceServiceCreator.ts';

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import {ref, onMounted, onBeforeUnmount, defineProps, computed, watch} from 'vue'
+import {ref, onMounted, onBeforeUnmount, computed, watch} from 'vue'
 import { nodeService,areaService } from '../../services'
 import apiService from '../../services'
 import type {AreaItem, HardwareNode} from '../../types.ts'
@@ -324,7 +324,6 @@ const showHistoryChart = () => {
 
 .area-card:hover {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-  transform: translateY(-3px);
 }
 
 .card-header {
@@ -427,7 +426,6 @@ const showHistoryChart = () => {
   transition: all 0.3s ease;
   overflow: hidden;
   border: 2px solid #ebeef5;
-  margin-bottom: 15px;
   position: relative; 
   cursor: pointer;
   display: flex;
@@ -436,9 +434,8 @@ const showHistoryChart = () => {
 }
 
 .area-card-compact:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
-  border-color: #dcdfe6;
+  box-shadow: 0 20px 25px rgba(125, 181, 206, 0.08);
+  border-color: #bde3ff;
 }
 
 .area-card-compact.offline {

@@ -1,8 +1,6 @@
 import { defaultApi } from '../network';
 import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 
-export type ResourceType = 'areas' | 'buildings' | 'nodes' | 'terminals' | 'users' | 'alerts' | 'notice' | 'historical';
-
 interface CacheItem<T> {
   data: T;
   timestamp: number;

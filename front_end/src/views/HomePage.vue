@@ -702,7 +702,7 @@ onBeforeUnmount(() => {
             <el-skeleton :rows="2" animated :loading="loadingNotices">
               <template #default>
                 <div v-if="notices.length > 0">
-                  <el-alert v-for="notice in notices" :key="notice.id" type="info" show-icon class="animated-alert mt-10">
+                  <el-alert v-for="notice in notices" :key="notice.id" type="info" show-icon class="animated-alert mb-10">
                     <template #icon>
                       <el-icon>
                         <Bell />
@@ -751,7 +751,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 改进的标题样式 */
 .header-card {
   text-align: center !important;
   background: linear-gradient(135deg, #f6f9ff 0%, #f0f5ff 100%) !important;
@@ -825,7 +824,6 @@ onBeforeUnmount(() => {
 }
 
 .header-title:hover {
-  transform: translateY(-2px);
   text-shadow: 0 6px 16px rgba(64, 158, 255, 0.25);
 }
 
@@ -879,7 +877,6 @@ onBeforeUnmount(() => {
   animation: fadeIn 1s ease-in-out;
 }
 
-/* 卡片标题优化 */
 .card-header {
   display: flex;
   align-items: center;
@@ -942,7 +939,6 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-card:hover {
-  transform: translateY(-5px);
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1) !important;
 }
 
@@ -1017,7 +1013,6 @@ onBeforeUnmount(() => {
 
   &:hover {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12) !important;
-    transform: translateY(-2px);
   }
 }
 
@@ -1123,7 +1118,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 320px !important;
   padding: 15px;
-
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   background-color: #fdfdfd;
@@ -1160,7 +1154,6 @@ onBeforeUnmount(() => {
 
 .el-alert--error {
   background-color: #fff0f0 !important;
-
   border: 1px solid rgba(245, 108, 108, 0.3);
 }
 
@@ -1245,7 +1238,6 @@ onBeforeUnmount(() => {
 
 .nav-item:hover {
   background-color: #ecf5ff;
-  transform: translateY(-3px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
