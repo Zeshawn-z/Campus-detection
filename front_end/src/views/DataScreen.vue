@@ -13,6 +13,9 @@ const selectedAreaId = ref(null);
 const selectedNodeId = ref<number | null>(null);
 const selectedBuildingId = ref<number | null>(DEFAULT_BUILDING_ID);
 
+// 此时 heatmapData 仅仅承载 id=2 的建筑区域数据，不再随选中的建筑变化
+const heatmapAreas = ref<AreaItem[]>([]);
+
 // 细粒度 Loading 状态
 const buildingsLoading = ref(true);
 const areasLoading = ref(true);
@@ -93,6 +96,33 @@ const areasWithEnvironmentData = computed(() => {
     };
   });
 });
+
+// heatmapAreasWithEnvironmentData 用于给 3DHeatMap 组件传值
+// 它基于 heatmapAreas（始终是 id=2 建筑的区域）+ nodes 数据
+const heatmapAreasWithEnvironmentData = computed(() => {
+  if (!heatmapAreas.value || !nodes.value) return [];
+
+  return heatmapAreas.value.map(area => {
+    const relatedNode = nodes.value.find(node => node.id === area.bound_node);
+    return {
+      ...area,
+      temperature: relatedNode?.temperature,
+      humidity: relatedNode?.humidity
+    };
+  });
+});
+
+// 3D 场景加载状态控制
+const is3DInitialized = ref(false); // 控制组件挂载
+const is3DReady = ref(false);      // 控制 Loading 遮罩
+
+// 3D 场景准备就绪回调
+const handle3DReady = () => {
+  // 添加一点延迟让渲染更平滑
+  setTimeout(() => {
+    is3DReady.value = true;
+  }, 500);
+}
 
 const summary = ref<SummaryData>({
   nodes_count: 0,
@@ -294,43 +324,55 @@ onMounted(async () => {
   try {
     pageState.loading = true
 
-    // 并行加载所有数据，不阻塞 Promise.all
-    // 1. 加载默认区域
-    areasLoading.value = true;
-    buildingService.getBuildingAreas(DEFAULT_BUILDING_ID)
-      .then(data => { areas.value = data })
-      .catch(err => console.error('加载默认区域失败', err))
-      .finally(() => { areasLoading.value = false });
-
-    // 2. 加载建筑列表
+    // 优先加载轻量级数据和UI列表，让非3D内容尽快渲染
+    
+    // 1. 加载建筑列表
     buildingsLoading.value = true;
     buildingService.getAll()
       .then(data => { buildings.value = data })
       .catch(err => console.error('加载建筑列表失败', err))
       .finally(() => { buildingsLoading.value = false });
 
-    // 3. 加载节点列表
+    // 2. 加载节点列表
     nodesLoading.value = true;
     nodeService.getAll()
       .then(data => { nodes.value = data })
       .catch(err => console.error('加载节点列表失败', err))
       .finally(() => { nodesLoading.value = false });
 
-    // 4. 加载统计和消息
+    // 3. 加载统计和消息
     statsLoading.value = true;
     Promise.all([
       updateStats(),
       fetchLatestMessages(),
     ]).finally(() => { statsLoading.value = false });
 
+    // 立即结束全局Loading状态，展示界面框架
+    pageState.loading = false    
+
+    // 4. 加载默认区域列表 (立即执行，确保列表和图表快速显示)
+    areasLoading.value = true;
+    buildingService.getBuildingAreas(DEFAULT_BUILDING_ID)
+      .then(data => { 
+        // 只有当前选中ID确实为DEFAULT_BUILDING_ID时才更新列表
+        if (selectedBuildingId.value === DEFAULT_BUILDING_ID) {
+          areas.value = data;
+        }
+        // 准备热力图数据
+        heatmapAreas.value = [...data];
+      })
+      .catch(err => console.error('加载默认区域失败', err))
+      .finally(() => { areasLoading.value = false });
+
+    // 5. [性能优化] 延迟挂载3D组件
+    // 目的：让浏览器先完成2D界面的绘制(列表、图表)，然后再开始繁重的3D初始化
+    setTimeout(() => {
+        is3DInitialized.value = true;
+    }, 800); 
+
     setTimeout(calculateCardWidths, 500)
     setTimeout(calculateCardHeights, 500)
-    // cardAnimationState.animationTimer = setInterval(() => {
-    //   if (!cardAnimationState.isMoving && areas.value.length > 0) {
-    //     animateCards()
-    //   }
-    // }, 2000)
-
+    
     const handleResize = () => {
       cardAnimationState.currentPosition = 0
       cardAnimationState.currentIndex = 0
@@ -347,10 +389,6 @@ onMounted(async () => {
     }
 
     window.addEventListener('resize', handleResize)
-    
-    // 初始化完成后，pageState.loading 设置为 false
-    // 为了更好的用户体验，可以保留一个很短的初始加载时间或者直接设为 false
-    pageState.loading = false
 
     const statsTimer = setInterval(updateStats, 3000)
     const messagesTimer = setInterval(fetchLatestMessages, 30000)
@@ -413,9 +451,30 @@ function formatTime(value: string) {
 <template>
   <div class="dashboard">
     <!-- 3D Heatmap as background -->
-    <ThreeDHeatMap :areas="areasWithEnvironmentData" 
-    class="heatmap-container-fullscreen" 
-    @areaSelected="handleAreaSelected" />
+    <div class="heatmap-wrapper">
+      <ThreeDHeatMap 
+        v-if="is3DInitialized"
+        :areas="heatmapAreasWithEnvironmentData" 
+        class="heatmap-container-fullscreen" 
+        :class="{ 'is-ready': is3DReady }"
+        @areaSelected="handleAreaSelected"
+        @scene-ready="handle3DReady" 
+      />
+      <!-- 3D Scene Loading Placeholder -->
+      <div v-if="!is3DReady" class="scene-loading-placeholder">
+        <div class="scene-loader">
+          <div class="hexagon-container">
+            <div class="hexagon hex-1"></div>
+            <div class="hexagon hex-2"></div>
+            <div class="hexagon hex-3"></div>
+          </div>
+          <div class="scene-loading-text">
+            <span class="">正在构建数字孪生模型...</span>
+            <div class="progress-bar-simple"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- UI Overlay -->
     <div class="ui-overlay">
@@ -677,6 +736,133 @@ function formatTime(value: string) {
   width: 100%;
   height: 100%;
   z-index: 1;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
+}
+
+.heatmap-container-fullscreen.is-ready {
+  opacity: 1;
+}
+
+.heatmap-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background: #0f172a;
+}
+
+.scene-loading-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+  z-index: 2;
+}
+
+.scene-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+
+.scene-loading-text {
+  color: #38bdf8;
+  font-size: 16px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-bar-simple {
+  width: 150px;
+  height: 2px;
+  background: rgba(56, 189, 248, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar-simple::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #38bdf8;
+  transform: translateX(-100%);
+  animation: loadingProgress 2s ease-in-out infinite;
+}
+
+@keyframes loadingProgress {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+.hexagon-container {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  animation: rotateHex 4s linear infinite;
+}
+
+.hexagon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 2px solid transparent;
+  border-radius: 50%;
+}
+
+.hex-1 {
+  border-top-color: #38bdf8;
+  border-bottom-color: #38bdf8;
+  animation: spinHex 2s linear infinite;
+}
+
+.hex-2 {
+  width: 80%;
+  height: 80%;
+  top: 10%;
+  left: 10%;
+  border-right-color: #38bdf8;
+  border-left-color: #38bdf8;
+  animation: spinHex 2s linear infinite reverse;
+}
+
+.hex-3 {
+  width: 60%;
+  height: 60%;
+  top: 20%;
+  left: 20%;
+  border-top-color: #818cf8;
+  border-bottom-color: #818cf8;
+  animation: spinHex 1.5s linear infinite;
+}
+
+@keyframes rotateHex {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes spinHex {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .ui-overlay {
@@ -900,7 +1086,6 @@ function formatTime(value: string) {
 }
 
 .overview-item:hover {
-  transform: translateY(-5px);
   box-shadow: 0 8px 25px rgba(56, 189, 248, 0.25);
 }
 

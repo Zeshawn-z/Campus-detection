@@ -20,6 +20,11 @@
         </div>
       </div>
 
+      <!-- 空状态 -->
+      <div v-else-if="items.length === 0" class="empty-state">
+        暂无数据
+      </div>
+
       <!-- 真实数据列表 -->
       <div 
         v-else
@@ -121,9 +126,17 @@ const scrollOffset = computed(() => {
 // 计算可见项目列表
 const visibleItems = computed(() => {
   if (items.value.length === 0) return [];
+  const itemCount = items.value.length;
+
+  // 如果数量小于等于4，不需要滚动，直接展示所有数据
+  if (itemCount <= 4) {
+    return items.value.map((item, index) => ({
+      virtualIndex: index,
+      data: item
+    }));
+  }
   
   const result: { virtualIndex: number; data: ListItem }[] = [];
-  const itemCount = items.value.length;
   
   // 计算起始索引（基于无限滚动位置）
   const relativePosition = scrollPosition.value % totalVirtualHeight.value;
@@ -155,8 +168,12 @@ const startScrolling = () => {
   
   updateWrapperHeight();
   
-  // 如果内容不足以滚动，则不启动动画
-  if (totalVirtualHeight.value <= wrapperHeight.value) return;
+  // 如果内容不足以滚动，或者数量小于等于4，则不启动动画
+  if (items.value.length <= 4 || totalVirtualHeight.value <= wrapperHeight.value) {
+    // 确保滚动位置重置为0，避免在切换数据时残留滚动位置
+    scrollPosition.value = 0;
+    return;
+  }
 
   const scroll = () => {
     // 只有在鼠标不悬停时才自动滚动
@@ -178,6 +195,9 @@ const startScrolling = () => {
 // 处理鼠标滚轮事件
 const handleWheel = (e: WheelEvent) => {
   if (items.value.length === 0) return;
+
+  // 如果不用滚动，则直接返回，允许默认行为（虽然可能也没滚动条）
+  if (items.value.length <= 4 || totalVirtualHeight.value <= wrapperHeight.value) return;
   
   // 阻止默认滚动行为，避免页面滚动
   e.preventDefault();
@@ -331,5 +351,14 @@ h2 {
 @keyframes skeleton-loading {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 14px;
 }
 </style>

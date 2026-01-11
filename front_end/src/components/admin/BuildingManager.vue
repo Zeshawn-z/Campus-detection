@@ -11,7 +11,7 @@
       <View resource="areas" data="buildings" :id="row.id" />
     </template>
 
-    <!-- 新增：类型列显示 -->
+    <!-- 类型列显示 -->
     <template #column-category="{ row }">
       <el-tag type="info">{{ categoryLabelMap[row.category] || '其他' }}</el-tag>
     </template>
@@ -22,7 +22,7 @@
           <el-input v-model="form.name" placeholder="请输入建筑名称" />
         </el-form-item>
 
-        <!-- 新增：建筑类型选择 -->
+        <!-- 建筑类型选择 -->
         <el-form-item label="建筑类型" required>
           <el-select v-model="form.category" placeholder="请选择建筑类型">
             <el-option
@@ -51,7 +51,7 @@
 import BaseManager from './BaseManager.vue'
 import View from './View.vue'
 
-// 新增：类型选项与显示映射
+// 类型选项与显示映射
 const CATEGORY_OPTIONS = [
   { value: 'library', label: '图书馆/阅览室' },
   { value: 'study', label: '自习室/学习空间' },

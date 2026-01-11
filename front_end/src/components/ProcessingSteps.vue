@@ -65,7 +65,7 @@
               <template v-if="typeof step.data === 'object'">
                 <div class="thought-text" v-if="step.data.action">行动：{{ step.data.action }}</div>
                 <div class="thought-text" v-if="step.data.iteration">迭代：第{{ step.data.iteration }}次</div>
-                <!-- 新增：展示规划器提供的回答大纲 -->
+                <!-- 展示规划器提供的回答大纲 -->
                 <div class="kv-block" v-if="Array.isArray(step.data.outline) && step.data.outline.length > 0">
                   <div class="kv-title">回答大纲</div>
                   <ul class="kv-list">
@@ -195,7 +195,7 @@ interface ProcessingStep {
   tool?: string;
   model?: string;
   data?: any; // 思考数据
-  content?: string; // 新增：步骤内的流式内容
+  content?: string; // 步骤内的流式内容
 }
 
 // 定义组件属性
@@ -391,7 +391,7 @@ const extractToolCallArgs = (call: any): Record<string, any> | null => {
   return (args && typeof args === 'object') ? args : null
 }
 
-// 新增：哪些步骤显示“详情”切换按钮（统一放到标题行右侧）
+// 哪些步骤显示“详情”切换按钮（统一放到标题行右侧）
 const shouldShowDetailToggle = (step: ProcessingStep) => {
   if (!step) return false
   if (step.type === 'thought') return !!step.data

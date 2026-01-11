@@ -8,7 +8,7 @@ import { Refresh, Download, FullScreen, Calendar } from '@element-plus/icons-vue
 interface Props {
   title?: string
   height?: string
-  width?: string  // 新增width prop
+  width?: string  // width prop
   loading?: boolean
   error?: string | null
   showTimeRange?: boolean
@@ -22,12 +22,12 @@ interface Props {
   theme?: 'light' | 'dark'
   gridConfig?: any
   legendConfig?: any
-  // 新增props
+  // props
   hideTitle?: boolean
   hideControls?: boolean
-  // 数据就绪标志 - 新增
+  // 数据就绪标志 - 
   dataReady?: boolean
-  // 新增样式配置选项
+  // 样式配置选项
   styleConfig?: {
     // 网格线配置
     gridLineColor?: string
@@ -44,7 +44,7 @@ interface Props {
     // 文字配置
     textColor?: string
     fontSize?: number
-    // 新增：线条宽度
+    // 线条宽度
     lineWidth?: number
     // 边距配置
     padding?: {
@@ -59,13 +59,13 @@ interface Props {
     // 工具提示配置
     tooltipBackgroundColor?: string
     tooltipTextColor?: string
-    // 新增：标题样式
+    // 标题样式
     titleStyle?: {
       fontSize?: number
       fontWeight?: string
       color?: string
     }
-    // 新增：区域填充样式
+    // 区域填充样式
     areaStyle?: {
       opacity?: number
       colorStops?: Array<{ offset: number; color: string }>
@@ -108,10 +108,10 @@ const props = withDefaults(defineProps<Props>(), {
       fontSize: 12
     }
   }),
-  // 新增默认值
+  // 默认值
   hideTitle: false,
   hideControls: false,
-  dataReady: false  // 新增默认值
+  dataReady: false  // 默认值
 })
 
 // Emits定义

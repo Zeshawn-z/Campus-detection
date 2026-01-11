@@ -10,14 +10,14 @@ interface Props {
   areaId?: number  // 修改为可选，支持默认值
   areaName?: string
   height?: string
-  width?: string  // 新增：宽度支持
+  width?: string  // 宽度支持
   showControls?: boolean
   hideTitle?: boolean
   hideControls?: boolean
   chartType?: 'line' | 'bar' | 'area'
-  hideDataZoom?: boolean  // 新增：隐藏下方范围选择条
-  hideStatistics?: boolean // 新增：隐藏统计信息
-  // 新增样式配置支持
+  hideDataZoom?: boolean  // 隐藏下方范围选择条
+  hideStatistics?: boolean // 隐藏统计信息
+  // 样式配置支持
   styleConfig?: {
     gridLineColor?: string
     gridLineType?: 'solid' | 'dashed' | 'dotted'
@@ -59,7 +59,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   areaId: 2,  // 默认 areaId = 2
   height: '100%',
-  width: '100%',  // 新增：默认宽度
+  width: '100%',  // 默认宽度
   showControls: true,
   hideTitle: false,
   hideControls: false,

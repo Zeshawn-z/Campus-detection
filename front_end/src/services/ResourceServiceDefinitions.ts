@@ -64,7 +64,7 @@ export const buildingCustomMethods = {
   getBuildingAreas: (id: number) => 
     customApiCall<AreaItem[]>(`/api/buildings/${id}/areas/`, 'get', undefined, {}, true, 5 * 60 * 1000),
   
-  // 新增：分页获取建筑区域
+  // 分页获取建筑区域
   getBuildingAreasPaginated: (id: number, page = 1, pageSize = 20) => 
     customApiCall<{
       areas: AreaItem[];
@@ -73,13 +73,13 @@ export const buildingCustomMethods = {
       page_size: number;
       has_next: boolean;
       has_previous: boolean;
-    }>(`/api/buildings/${id}/areas_paginated/`, 'get', undefined, { page, page_size: pageSize }),
+    }>(`/api/buildings/${id}/areas_paginated/`, 'get', undefined, { page, page_size: pageSize }, true),
   
-  // 新增：获取建筑基本信息
+  // 获取建筑基本信息
   getBuildingsBasic: () => 
     customApiCall<Building[]>('/api/buildings/list_basic/', 'get', undefined, {}, true, 5 * 60 * 1000),
   
-  // 新增：批量加载多个建筑的区域
+  // 批量加载多个建筑的区域
   loadBuildingsWithAreas: async (buildingIds: number[], pageSize = 20) => {
     const results = await Promise.all(
       buildingIds.map(async (id) => {

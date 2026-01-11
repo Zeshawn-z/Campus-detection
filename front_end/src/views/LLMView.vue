@@ -1,7 +1,7 @@
 <template>
   <div class="llm-container">
     <div class="layout">
-      <!-- 左侧侧边栏：新增折叠 -->
+      <!-- 左侧侧边栏：折叠 -->
       <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
         <div class="sidebar-header">
           <!-- 改造品牌标题为"云小瞻" + 副标题 -->
@@ -115,7 +115,7 @@
                     <el-icon><Position /></el-icon>
                   </button>
                 </div>
-                <!-- 新增：模型切换按钮（默认分析，无需按钮） -->
+                <!-- 模型切换按钮（默认分析，无需按钮） -->
                 <div class="composer-toolbar">
                   <div class="model-toggle">
                     <button
@@ -280,8 +280,8 @@ type ProcessingStep = {
   confidence?: number;
   tool?: string;
   model?: string;
-  data?: any; // 新增：用于存储 thought 数据
-  content?: string; // 新增：步骤内流式文本
+  data?: any; // 用于存储 thought 数据
+  content?: string; // 步骤内流式文本
 }
 
 // 添加缺少的ref定义
@@ -289,7 +289,7 @@ const chatContainer = ref<any>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const inputContainer = ref<HTMLElement | null>(null)
 
-// 新增：添加abortController引用
+// 添加abortController引用
 const abortController = ref<AbortController | null>(null)
 
 // 默认：分析（无需按钮）
@@ -540,7 +540,7 @@ const processStreamData = (data: any, aiMsg: Message) => {
     return
   }
   
-  // 处理规划进度流式输出（新增）
+  // 处理规划进度流式输出（）
   if (data.type === 'planning_progress') {
     const progressText = data.content || ''
     
@@ -607,7 +607,7 @@ const processStreamData = (data: any, aiMsg: Message) => {
       data: stepData // 存储思考数据、工具参数等
     }
     
-    // 新增：为规划步骤携带本轮次 iteration，便于前端区分轮次
+    // 为规划步骤携带本轮次 iteration，便于前端区分轮次
     if (data.type === 'agent_planning' || data.type === 'agent_replanning') {
       step.data = { ...(step.data || {}), iteration: data.iteration }
     }
@@ -1412,7 +1412,7 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-/* Markdown 样式 - 新增标题缩进样式 */
+/* Markdown 样式 - 标题缩进样式 */
 :deep(.markdown-body) {
   width: 100%;
 }

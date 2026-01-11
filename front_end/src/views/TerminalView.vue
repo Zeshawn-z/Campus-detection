@@ -40,7 +40,7 @@ import {
   Bell,
   Mute,
   MagicStick,
-  Warning, // 新增：用于按钮图标
+  Warning, // 用于按钮图标
 } from '@element-plus/icons-vue';
 
 const route = useRoute();
@@ -95,7 +95,7 @@ const status = reactive({
   last_detection: null,
   mode: 'both',
   terminal_id: null,
-  // 新增：节点详细映射（来自后端）
+  // 节点详细映射（来自后端）
   node_details: {} as Record<string | number, any>
 });
 
@@ -268,7 +268,7 @@ const loadTerminalStatus = async () => {
       last_detection: data.last_detection ?? null,
       mode: data.mode ?? 'both',
       terminal_id: data.terminal_id ?? null,
-      // 新增：节点详情
+      // 节点详情
       node_details: data.node_details || {}
     };
     Object.assign(status, statusData);
@@ -932,7 +932,7 @@ const getFrameSizeLabel = (framesize?: number) => {
   return item ? item.label : String(framesize);
 };
 
-// 新增：获取某个节点的详细信息（兼容 number/string 键）
+// 获取某个节点的详细信息（兼容 number/string 键）
 const getNodeDetail = (id: string | number) => {
   const details: any = status.node_details || {};
   if (details[id] !== undefined) return details[id];
@@ -2560,7 +2560,7 @@ watch(connectionMode, (newMode, oldMode) => {
   flex: 1;
 }
 
-/* 新增：上次检测结果样式 */
+/* 上次检测结果样式 */
 .node-last-detect {
   margin-top: 4px;
   font-size: 12px;

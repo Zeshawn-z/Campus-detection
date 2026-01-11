@@ -1755,7 +1755,7 @@ nodes-grid::-webkit-scrollbar-thumb {
 .status-grid:hover .card-container {
   animation-play-state: paused;
 }
-/* 新增：让热力图绝对定位并拉伸 */
+/* 让热力图绝对定位并拉伸 */
 .absolute-heatmap {
   position: absolute;
   top: 0;
@@ -1769,7 +1769,7 @@ nodes-grid::-webkit-scrollbar-thumb {
   /* 可选：如果需要透明度可调整 */
   opacity: 1;
 }
-/* 新增：渐变暗效果 */
+/* 渐变暗效果 */
 .absolute-heatmap::after {
   content: '';
   position: absolute;

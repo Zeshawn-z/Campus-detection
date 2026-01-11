@@ -12,7 +12,7 @@ const activeBoardPosition = ref<THREE.Vector3 | null>(null);
 const activeBoardAreaData = ref<any>(null);
 
 // 在<script setup>部分添加emit定义
-const emit = defineEmits(['areaSelected']);
+const emit = defineEmits(['areaSelected', 'scene-ready']);
 
 // 聚焦相关
 const focusModeActive = ref(false);
@@ -1043,10 +1043,15 @@ const loadBackgroundModel = () => {
 
       scene.add(object)
       console.log('背景模型加载成功。')
+      
+      // 触发场景准备就绪事件
+      emit('scene-ready');
     },
     undefined,
     (error) => {
       console.error('背景模型加载出错:', error)
+      // 即使背景加载失败，也不应阻塞流程，依然触发就绪
+      emit('scene-ready');
     }
   )
 }
@@ -2219,90 +2224,92 @@ const createParticlesFromDensityField = (densityField) => {
   console.log('开始生成粒子...');
   const { grid, bounds, resolution, cellSize } = densityField;
 
-  // 找到最大密度值，避免除以零
-  const maxDensity = Math.max(...grid, 0.001);
-  console.log(`最大密度值: ${maxDensity}`);
+  // 1. 计算总密度和最大密度
+  let totalDensity = 0;
+  let maxDensity = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const d = grid[i];
+    totalDensity += d;
+    if (d > maxDensity) maxDensity = d;
+  }
+  
+  // 防止除以零
+  if (totalDensity <= 0.000001) totalDensity = 1;
+  if (maxDensity <= 0.000001) maxDensity = 0.001;
+
+  console.log(`最大密度值: ${maxDensity}, 总密度: ${totalDensity}`);
 
   // 根据总密度估计粒子数量，限制最大数量
-  const desiredParticleCount = 200000
-  console.log(`目标粒子数量: ${desiredParticleCount}`);
+  // 使用确定的目标粒子数，而非基于尝试次数
+  const targetParticleCount = 60000; 
+  console.log(`目标粒子数量: ${targetParticleCount}`);
 
   // 预分配数组
-  const particlePositions = new Float32Array(desiredParticleCount * 3);
-  const particleColors = new Float32Array(desiredParticleCount * 3);
-  const particleVelocity = new Float32Array(desiredParticleCount * 3);
-  const particleRandomness = new Float32Array(desiredParticleCount * 3);
-  const particlePhases = new Float32Array(desiredParticleCount);
+  const particlePositions = new Float32Array(targetParticleCount * 3);
+  const particleColors = new Float32Array(targetParticleCount * 3);
+  const particleVelocity = new Float32Array(targetParticleCount * 3);
+  const particleRandomness = new Float32Array(targetParticleCount * 3);
+  const particlePhases = new Float32Array(targetParticleCount);
 
   let particleIndex = 0;
 
-  // 使用接受-拒绝采样法基于密度分布生成粒子
-  const attempts = desiredParticleCount; // 限制尝试次数
-  for (let i = 0; i < attempts; i++) {
-    // 随机选择一个网格点
-    const x = Math.floor(Math.random() * resolution);
-    const y = Math.floor(Math.random() * resolution);
-    const z = Math.floor(Math.random() * resolution);
+  // 2. 遍历网格，直接在有密度的单元格中生成粒子
+  // 这种方法比拒绝采样更高效，且能保证粒子数量
+  for (let x = 0; x < resolution; x++) {
+    for (let y = 0; y < resolution; y++) {
+      for (let z = 0; z < resolution; z++) {
+        const gridIndex = x + y * resolution + z * resolution * resolution;
+        const cellDensity = grid[gridIndex];
 
-    const gridIndex = x + y * resolution + z * resolution * resolution;
-    const cellDensity = grid[gridIndex];
+        // 跳过密度过小的区域
+        if (cellDensity <= 0.001) continue;
 
-    // 归一化的密度值
-    const normalizedDensity = cellDensity / maxDensity;
-
-    // 对密度值进行非线性增强，让高密度区域的概率增长更快
-
-    // 添加基础概率确保低密度区域也能生成粒子
-    const baseProbability = 0;  // 降低基础概率，让低密度区域更稀疏
-    const densityWeight = 1;    // 增加密度权重
-
-    // 计算综合概率
-    const generationProbability = baseProbability + normalizedDensity * densityWeight * 2.3;
-
-    // 基于综合概率决定是否在此位置生成粒子
-    if (Math.random() < generationProbability) {
-      const index = particleIndex * 3;
-
-      // 在体素内随机位置
-      particlePositions[index] = bounds.min.x + (x + Math.random()) * cellSize.x;
-      particlePositions[index + 1] = bounds.min.y + (y + Math.random()) * cellSize.y;
-      particlePositions[index + 2] = bounds.min.z + (z + Math.random()) * cellSize.z;
+        // 计算该单元格应生成的粒子数量
+        // 期望数量 = (单元格密度 / 总密度) * 总粒子数
+        const expectedCount = (cellDensity / totalDensity) * targetParticleCount;
         
-      // 在createParticlesFromDensityField函数中，替换原有的颜色设置部分
+        // 整数部分 + 概率性的小数部分
+        let count = Math.floor(expectedCount);
+        if (Math.random() < (expectedCount - count)) {
+          count++;
+        }
 
-      // 使用归一化密度值设置连续颜色渐变
-      const normalizedDensity = cellDensity / maxDensity;
+        // 生成粒子
+        for (let k = 0; k < count; k++) {
+          if (particleIndex >= targetParticleCount) break;
 
-      // 反转密度值，使得高密度为红色，低密度为蓝色
-      const reversedValue = 1 - normalizedDensity;
+          const index = particleIndex * 3;
 
-      // 基于反转值设置颜色分量
-      // 红色分量：在0-0.5范围内为1，在0.5-1范围内从1线性降至0
-      particleColors[index] = reversedValue <= 0.5 ? 1.0 : 1.0 - (reversedValue - 0.5) * 2;
+          // 在体素内生成随机位置
+          particlePositions[index] = bounds.min.x + (x + Math.random()) * cellSize.x;
+          particlePositions[index + 1] = bounds.min.y + (y + Math.random()) * cellSize.y;
+          particlePositions[index + 2] = bounds.min.z + (z + Math.random()) * cellSize.z;
 
-      // 绿色分量：在0-0.5范围内从0线性增至1，在0.5-1范围内从1线性降至0.2
-      particleColors[index + 1] = reversedValue <= 0.5 ? 
-                                reversedValue * 2 : 
-                                1.0 - (reversedValue - 0.5) * 1.6;
+          // 颜色计算逻辑保持不变
+          const normalizedDensity = cellDensity / maxDensity;
+          const reversedValue = 1 - normalizedDensity;
 
-      // 蓝色分量：在0-0.5范围内为0，在0.5-1范围内从0线性增至1
-      particleColors[index + 2] = reversedValue <= 0.5 ? 0.0 : (reversedValue - 0.5) * 2;
+          // 红色分量
+          particleColors[index] = reversedValue <= 0.5 ? 1.0 : 1.0 - (reversedValue - 0.5) * 2;
+          // 绿色分量
+          particleColors[index + 1] = reversedValue <= 0.5 ? reversedValue * 2 : 1.0 - (reversedValue - 0.5) * 1.6;
+          // 蓝色分量
+          particleColors[index + 2] = reversedValue <= 0.5 ? 0.0 : (reversedValue - 0.5) * 2;
 
+          // 运动参数
+          particleVelocity[index] = (Math.random() - 0.5) * 1;
+          particleVelocity[index + 1] = (Math.random() - 0.5) * 1;
+          particleVelocity[index + 2] = (Math.random() - 0.5) * 1;
 
-      // 设置运动参数 - 使用原有代码
-      particleVelocity[index] = (Math.random() - 0.5) * 1;
-      particleVelocity[index + 1] = (Math.random() - 0.5) * 1;
-      particleVelocity[index + 2] = (Math.random() - 0.5) * 1;
+          particleRandomness[index] = Math.random() * 0.3;
+          particleRandomness[index + 1] = Math.random() * 0.3;
+          particleRandomness[index + 2] = Math.random() * 0.3;
 
-      particleRandomness[index] = Math.random() * 0.3;
-      particleRandomness[index + 1] = Math.random() * 0.3;
-      particleRandomness[index + 2] = Math.random() * 0.3;
+          particlePhases[particleIndex] = Math.random() * Math.PI * 2;
 
-      particlePhases[particleIndex] = Math.random() * Math.PI * 2;
-
-      particleIndex++;
-
-      if (particleIndex >= desiredParticleCount) break;
+          particleIndex++;
+        }
+      }
     }
   }
 

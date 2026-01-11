@@ -7,7 +7,7 @@ import {buildingService} from '../services'
 import {buildingCustomMethods} from '../services/ResourceServiceDefinitions'
 import AreaCard from '../components/data/AreaCard.vue'
 
-// 新增：建筑类型显示映射
+// 建筑类型显示映射
 const categoryLabelMap: Record<string, string> = {
   library: '图书馆/阅览室',
   study: '自习室/学习空间',
@@ -603,7 +603,7 @@ watch(buildings, () => {
                   </el-icon>
                 </div>
                 <h2 class="building-title">{{ building.name }}</h2>
-                <!-- 新增：显示建筑类型 -->
+                <!-- 显示建筑类型 -->
                 <el-tag v-if="(building as any).category" size="small" effect="plain">
                   {{ categoryLabelMap[(building as any).category] || '其他' }}
                 </el-tag>

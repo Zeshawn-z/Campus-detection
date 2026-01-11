@@ -177,7 +177,7 @@ import { useAuthStore } from '../../stores/auth.ts'
 import {
   UserFilled, ArrowDown, HomeFilled, Menu as MenuIcon, DataLine,
   SwitchButton, Operation, Lock, Star, Bell, Menu, Close, MagicStick, StarFilled,
-  // 新增用于导航栏的图标
+  // 用于导航栏的图标
   MapLocation, Histogram, Management, Monitor
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -283,7 +283,7 @@ const getIconComponent = (iconName: string) => {
     'Operation': Operation,
     'MagicStick': MagicStick,
     'StarFilled': StarFilled,
-    // 新增映射
+    // 映射
     'MapLocation': MapLocation,
     'Histogram': Histogram,
     'Management': Management,

@@ -37,18 +37,18 @@ import type {
 } from '../types';
 
 // 创建各个资源服务
-export const areaService = createResourceService<AreaItem>('areas', areaCustomMethods);
-export const buildingService = createResourceService<Building>('buildings', buildingCustomMethods);
-export const nodeService = createResourceService<HardwareNode>('nodes', nodeCustomMethods);
-export const terminalService = createResourceService<ProcessTerminal>('terminals', terminalCustomMethods);
-export const alertService = createResourceService<Alert>('alerts', alertCustomMethods);
-export const noticeService = createResourceService<Notice>('notice', noticeCustomMethods);
-export const userService = createResourceService<User>('users', userCustomMethods);
-export const historicalService = createResourceService<HistoricalData>('historical', historicalCustomMethods);
+export const areaService = createResourceService<AreaItem, typeof areaCustomMethods>('areas', areaCustomMethods);
+export const buildingService = createResourceService<Building, typeof buildingCustomMethods>('buildings', buildingCustomMethods);
+export const nodeService = createResourceService<HardwareNode, typeof nodeCustomMethods>('nodes', nodeCustomMethods);
+export const terminalService = createResourceService<ProcessTerminal, typeof terminalCustomMethods>('terminals', terminalCustomMethods);
+export const alertService = createResourceService<Alert, typeof alertCustomMethods>('alerts', alertCustomMethods);
+export const noticeService = createResourceService<Notice, typeof noticeCustomMethods>('notice', noticeCustomMethods);
+export const userService = createResourceService<User, typeof userCustomMethods>('users', userCustomMethods);
+export const historicalService = createResourceService<HistoricalData, typeof historicalCustomMethods>('historical', historicalCustomMethods);
 
 // 环境数据服务
-export const temperatureHumidityService = createResourceService<TemperatureHumidityData>('temperature-humidity', temperatureHumidityCustomMethods);
-export const co2Service = createResourceService<CO2Data>('co2', co2CustomMethods);
+export const temperatureHumidityService = createResourceService<TemperatureHumidityData, typeof temperatureHumidityCustomMethods>('temperature-humidity', temperatureHumidityCustomMethods);
+export const co2Service = createResourceService<CO2Data, typeof co2CustomMethods>('co2', co2CustomMethods);
 
 // 系统服务
 export const summaryService = summaryCustomMethods;

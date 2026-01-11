@@ -43,7 +43,7 @@ interface Props {
       fontWeight?: string
       color?: string
     }
-    // 新增 areaStyle 类型定义
+    //  areaStyle 类型定义
     areaStyle?: {
       opacity?: number
       colorStops?: Array<{ offset: number; color: string }>
@@ -60,7 +60,7 @@ const props = withDefaults(defineProps<Props>(), {
   styleConfig: () => ({})
 })
 
-// 新增emit定义
+// emit定义
 const emit = defineEmits<{
   timeRangeChange: [value: number]
 }>()
