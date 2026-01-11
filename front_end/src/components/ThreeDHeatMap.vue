@@ -2224,7 +2224,7 @@ const createParticlesFromDensityField = (densityField) => {
   console.log(`最大密度值: ${maxDensity}`);
 
   // 根据总密度估计粒子数量，限制最大数量
-  const desiredParticleCount = 100000000
+  const desiredParticleCount = 200000
   console.log(`目标粒子数量: ${desiredParticleCount}`);
 
   // 预分配数组

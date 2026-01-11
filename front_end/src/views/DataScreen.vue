@@ -8,19 +8,64 @@ import HistoricalChart2 from '../components/chart-datascreen/HistoricalChart2.vu
 import HardwareNodeStatus from '../components/data/HardwareNodeStatus.vue'
 import EnvironmentalChart2 from '../components/chart-datascreen/EnvironmentalChart2.vue'
 
-// 在<script setup>部分添加选中区域的状态
+const DEFAULT_BUILDING_ID = 2;
 const selectedAreaId = ref(null);
+const selectedNodeId = ref<number | null>(null);
+const selectedBuildingId = ref<number | null>(DEFAULT_BUILDING_ID);
+
+// 细粒度 Loading 状态
+const buildingsLoading = ref(true);
+const areasLoading = ref(true);
+const nodesLoading = ref(true);
+const statsLoading = ref(true);
+
 // 添加处理区域选择事件的函数
 const handleAreaSelected = (areaId) => {
   console.log('选中区域ID:', areaId);
   selectedAreaId.value = areaId;
   currentAreaIndex.value = areas.value.findIndex(area => area.id === areaId);
   
+  // 联动选中节点
+  const area = areas.value.find(a => a.id === areaId);
+  if (area && area.bound_node) {
+    selectedNodeId.value = area.bound_node;
+  } else {
+    selectedNodeId.value = null;
+  }
+  
   // 如果找不到对应区域，设置为第一个区域
   if (currentAreaIndex.value === -1 && areas.value.length > 0) {
     currentAreaIndex.value = 0;
   }
 };
+
+const handleBuildingClick = async (building: any) => {
+  try {
+    areasLoading.value = true; // 开始加载
+    areas.value = []; // 清空当前显示，避免混淆
+
+    if (selectedBuildingId.value === building.id) {
+      selectedBuildingId.value = null;
+      // 取消选中，加载默认建筑的区域
+      const data = await buildingService.getBuildingAreas(DEFAULT_BUILDING_ID);
+      areas.value = data;
+    } else {
+      selectedBuildingId.value = building.id;
+      // 选中建筑，获取该建筑的区域
+      const data = await buildingService.getBuildingAreas(building.id);
+      areas.value = data;
+    }
+  } catch (error) {
+    console.error('获取区域数据失败:', error);
+  } finally {
+    areasLoading.value = false; // 结束加载
+  }
+};
+
+const filteredAreas = computed(() => {
+  // 由于 areas 已经根据选择动态更新，这里直接返回即可
+  return areas.value;
+});
 
 // watch监听selectedAreaId变化，更新图表显示
 watch(selectedAreaId, (newId) => {
@@ -249,20 +294,34 @@ onMounted(async () => {
   try {
     pageState.loading = true
 
-    const [areasData, buildingsData, nodesData] = await Promise.all([
-      buildingService.getBuildingAreas(2),
-      buildingService.getAll(), // 假设存在 getAll 方法
-      nodeService.getAll() // 假设存在 getAll 方法
-    ]);
+    // 并行加载所有数据，不阻塞 Promise.all
+    // 1. 加载默认区域
+    areasLoading.value = true;
+    buildingService.getBuildingAreas(DEFAULT_BUILDING_ID)
+      .then(data => { areas.value = data })
+      .catch(err => console.error('加载默认区域失败', err))
+      .finally(() => { areasLoading.value = false });
 
-    areas.value = areasData;
-    buildings.value = buildingsData;
-    nodes.value = nodesData;
+    // 2. 加载建筑列表
+    buildingsLoading.value = true;
+    buildingService.getAll()
+      .then(data => { buildings.value = data })
+      .catch(err => console.error('加载建筑列表失败', err))
+      .finally(() => { buildingsLoading.value = false });
 
-    await Promise.all([
+    // 3. 加载节点列表
+    nodesLoading.value = true;
+    nodeService.getAll()
+      .then(data => { nodes.value = data })
+      .catch(err => console.error('加载节点列表失败', err))
+      .finally(() => { nodesLoading.value = false });
+
+    // 4. 加载统计和消息
+    statsLoading.value = true;
+    Promise.all([
       updateStats(),
       fetchLatestMessages(),
-    ])
+    ]).finally(() => { statsLoading.value = false });
 
     setTimeout(calculateCardWidths, 500)
     setTimeout(calculateCardHeights, 500)
@@ -288,6 +347,9 @@ onMounted(async () => {
     }
 
     window.addEventListener('resize', handleResize)
+    
+    // 初始化完成后，pageState.loading 设置为 false
+    // 为了更好的用户体验，可以保留一个很短的初始加载时间或者直接设为 false
     pageState.loading = false
 
     const statsTimer = setInterval(updateStats, 3000)
@@ -460,7 +522,7 @@ function formatTime(value: string) {
         <!-- Center Content -->
         <div class="main-content">
           <div class="left-column">
-            <CarouselList title="建筑列表" subtitle="Building List" :items="buildings">
+            <CarouselList title="建筑列表" subtitle="Building List" :items="buildings" :loading="buildingsLoading" :selectedId="selectedBuildingId" @itemClick="handleBuildingClick">
               <template #item="{ item }">
                 <div class="list-item-custom">
                   <span>{{ item.name }}</span>
@@ -469,7 +531,7 @@ function formatTime(value: string) {
               </template>
             </CarouselList>
 
-            <CarouselList title="区域列表" subtitle="Area List" :items="areas">
+            <CarouselList title="区域列表" subtitle="Area List" :items="filteredAreas" :loading="areasLoading" :selectedId="selectedAreaId" @itemClick="(item) => handleAreaSelected(item.id)">
               <template #item="{ item }">
                 <div class="list-item-custom">
                   <span>{{ item.name }}</span>
@@ -478,7 +540,7 @@ function formatTime(value: string) {
               </template>
             </CarouselList>
 
-            <CarouselList title="节点列表" subtitle="Node List" :items="nodes">
+            <CarouselList title="节点列表" subtitle="Node List" :items="nodes" :loading="nodesLoading" :selectedId="selectedNodeId">
               <template #item="{ item }">
                 <div class="list-item-custom">
                   <span>{{ item.name }}</span>
@@ -496,7 +558,11 @@ function formatTime(value: string) {
           <div class="right-column">
             <div ref="chartRef" class="chart-container">
               <div class="tech-corners"></div>
-              <div class="chart-inner-container">
+              <div v-if="areasLoading" class="chart-loading">
+                <div class="loading-spinner-small"></div>
+                <span class="loading-text-small">加载中...</span>
+              </div>
+              <div v-else class="chart-inner-container">
                 <EnvironmentalChart2 :areaId="selectedAreaId || (areas.length > 0 ? areas[currentAreaIndex].id : null)"
                   :dataType="'temperature-humidity'" :hideTitle="true" :hideControls="true" :width="'100%'"
                   :height="'100%'" :styleConfig="{
@@ -533,7 +599,11 @@ function formatTime(value: string) {
             </div>
             <div ref="chartRef" class="chart-container">
               <div class="tech-corners"></div>
-              <div class="chart-inner-container">
+              <div v-if="areasLoading" class="chart-loading">
+                <div class="loading-spinner-small"></div>
+                <span class="loading-text-small">加载中...</span>
+              </div>
+              <div v-else class="chart-inner-container">
                 <HistoricalChart2 :areaId="selectedAreaId || (areas.length > 0 ? areas[currentAreaIndex].id : null)" 
                   :hideTitle="true"
                   :hideControls="true" :width="'100%'" :height="'100%'" :hideDataZoom="true" :hideStatistics="true"
@@ -1180,8 +1250,10 @@ function formatTime(value: string) {
 
   backdrop-filter: blur(5px);
   padding: 10px;
+  display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 250px; /* 设置最小高度支撑 */
+  flex: 1; /* 让它们平分垂直空间 */
 }
 
 .list-item-custom {
@@ -1200,5 +1272,46 @@ function formatTime(value: string) {
 .list-item-custom>span:first-child {
   color: #e0f2fe;
   font-weight: 500;
+}
+
+.selected-item {
+  background: rgba(56, 189, 248, 0.3) !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 4px;
+}
+
+.chart-container {
+  position: relative;
+}
+
+.chart-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: blur(2px);
+}
+
+.loading-spinner-small {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(56, 189, 248, 0.3);
+  border-top: 3px solid #38bdf8;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text-small {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #e2e8f0;
 }
 </style>
