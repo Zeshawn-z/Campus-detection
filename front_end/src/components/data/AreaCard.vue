@@ -29,7 +29,7 @@ const fetchNodeData = async () => {
   if (!isComponentMounted.value) return
   
   try {
-    const data = await nodeService.getDatabyAreaId(props.area.id)
+    const data : HardwareNode = await nodeService.getDatabyAreaId(props.area.id)
     if (isComponentMounted.value) {
       nodeData.value = data
     }

@@ -99,7 +99,7 @@ export const buildingCustomMethods = {
 // 节点服务自定义方法
 export const nodeCustomMethods = {
   getDatabyAreaId: (areaId: number) =>
-    customApiCall<HardwareNode[]>(`/api/areas/${areaId}/data/`, 'get', undefined, {}, true, 5000),
+    customApiCall<HardwareNode>(`/api/areas/${areaId}/data/`, 'get', undefined, {}, true, 5000),
 };
 
 // 终端服务自定义方法
@@ -109,6 +109,9 @@ export const terminalCustomMethods = {
     
   getTerminalStatus: (id: number) => 
     customApiCall(`/api/terminals/${id}/status/`, 'get', undefined, {}, false),
+
+  getBuzzerStatus: (id: number) => 
+    customApiCall<any>(`/api/terminals/${id}/buzzer/status/`, 'get', undefined, {}, false),
     
   getTerminalLogs: (id: number, params = {}) => 
     customApiCall<LogEntry[]>(`/api/terminals/${id}/logs/`, 'get', undefined, params, false),

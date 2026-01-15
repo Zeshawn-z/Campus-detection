@@ -194,15 +194,15 @@ const fetchLatestMessages = async () => {
         text: `🚨 ${alert.message}`,
         type: getAlertType(alert.grade),
         timestamp: alert.timestamp,
-        sourceType: 'alert',
+        sourceType: 'alert' as const,
         sourceId: alert.id
       })),
       ...notices.map(notice => ({
         id: notice.id,
         text: `ℹ️ ${notice.title}`,
-        type: 'info',
+        type: 'info' as MessageType,
         timestamp: notice.timestamp,
-        sourceType: 'notice',
+        sourceType: 'notice' as const,
         sourceId: notice.id
       }))
     ]

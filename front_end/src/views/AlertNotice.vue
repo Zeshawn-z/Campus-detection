@@ -154,7 +154,7 @@ const submitNotice = async () => {
   noticeSubmitting.value = true
   try {
     
-    await noticeService.createNotice({
+    await noticeService.create({
       title: noticeForm.title,
       content: noticeForm.content,
       related_areas: noticeForm.related_areas
