@@ -5,6 +5,51 @@ from webapi.models import Area, Alert
 User = get_user_model()
 
 
+class ChatSession(models.Model):
+    """对话会话 - 持久化存储"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_sessions',
+                            null=True, blank=True, help_text="关联用户，匿名会话可为空")
+    session_id = models.CharField(max_length=128, unique=True, db_index=True,
+                                 help_text="会话唯一标识（前端生成的UUID）")
+    title = models.CharField(max_length=200, default="新对话", help_text="会话标题（取首条消息摘要）")
+    model_type = models.CharField(max_length=32, default="default", help_text="使用的模型类型")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_archived = models.BooleanField(default=False, help_text="是否已归档")
+    
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = "对话会话"
+        verbose_name_plural = "对话会话"
+    
+    def __str__(self):
+        return f"{self.title} ({self.session_id[:8]}...)"
+
+
+class ChatMessage(models.Model):
+    """对话消息 - 单条消息持久化"""
+    ROLE_CHOICES = [
+        ('user', '用户'),
+        ('assistant', 'AI助手'),
+        ('system', '系统'),
+    ]
+    
+    session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES)
+    content = models.TextField(help_text="消息内容")
+    metadata = models.JSONField(default=dict, blank=True,
+                               help_text="附加元数据（如模型类型、工具调用记录等）")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = "对话消息"
+        verbose_name_plural = "对话消息"
+    
+    def __str__(self):
+        return f"[{self.role}] {self.content[:50]}..."
+
+
 class LLMAnalysis(models.Model):
     """LLM分析结果存储"""
     area = models.ForeignKey(Area, on_delete=models.CASCADE, related_name='llm_analyses')

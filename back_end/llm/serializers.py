@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import (
-    LLMAnalysis, UserRecommendation, AlertAnalysis, AreaUsagePattern, GeneratedContent
+    LLMAnalysis, UserRecommendation, AlertAnalysis, AreaUsagePattern, GeneratedContent,
+    ChatSession, ChatMessage
 )
 import json
 
@@ -73,3 +74,41 @@ class GeneratedContentSerializer(serializers.ModelSerializer):
         if obj.related_area:
             return obj.related_area.name
         return None
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = ['id', 'role', 'content', 'metadata', 'created_at']
+
+
+class ChatSessionSerializer(serializers.ModelSerializer):
+    message_count = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ChatSession
+        fields = ['id', 'session_id', 'title', 'model_type', 'created_at', 
+                 'updated_at', 'is_archived', 'message_count', 'last_message']
+    
+    def get_message_count(self, obj):
+        return obj.messages.count()
+    
+    def get_last_message(self, obj):
+        last = obj.messages.order_by('-created_at').first()
+        if last:
+            return {
+                'role': last.role,
+                'content': last.content[:100],
+                'created_at': last.created_at.isoformat()
+            }
+        return None
+
+
+class ChatSessionDetailSerializer(serializers.ModelSerializer):
+    messages = ChatMessageSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = ChatSession
+        fields = ['id', 'session_id', 'title', 'model_type', 'created_at', 
+                 'updated_at', 'is_archived', 'messages']

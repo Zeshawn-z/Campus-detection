@@ -7,7 +7,7 @@ from channels.db import database_sync_to_async
 from django.core.cache import cache
 from django.utils import timezone
 from datetime import timedelta
-from .models import ProcessTerminal, HardwareNode, Area, HistoricalData
+from .models import ProcessTerminal, HardwareNode, Area, HistoricalData, Alert
 
 logger = logging.getLogger('django')
 
@@ -131,6 +131,24 @@ class TerminalConsumer(AsyncWebsocketConsumer):
                 )
                 # 新增：检测端已确认上线后，立即下发待发命令队列
                 await self.flush_pending_commands()
+            
+            # ===== 消息分发：根据消息类型路由到对应的处理方法 =====
+            if message_type == 'system_status':
+                await self.handle_system_status(data)
+            elif message_type == 'nodes_data':
+                await self.handle_nodes_data(data)
+            elif message_type == 'heartbeat':
+                await self.handle_heartbeat(data)
+            elif message_type == 'log':
+                await self.handle_log_message(data)
+            elif message_type == 'command_response':
+                await self.handle_command_response(data)
+            elif message_type == 'client_command':
+                # 处理来自前端客户端的命令请求（转发到检测端）
+                await self.handle_client_command(data)
+            else:
+                logger.warning(f"终端 {self.terminal_id} 收到未知消息类型: {message_type}")
+                
         except json.JSONDecodeError:
             logger.error(f"收到无效的JSON数据: {text_data[:100]}...")
         except Exception as e:
@@ -145,6 +163,23 @@ class TerminalConsumer(AsyncWebsocketConsumer):
             
         # 更新节点数据到数据库
         updated_nodes = await self.update_nodes_data(nodes_data)
+        
+        # 自动告警检测：检查人流量/温湿度是否超阈值
+        alerts_created = await self.check_and_create_alerts(nodes_data)
+        
+        # 如果有新告警产生，通过系统广播通道推送
+        for alert_data in alerts_created:
+            await self.channel_layer.group_send(
+                "system_broadcast",
+                {
+                    'type': 'broadcast_message',
+                    'message': {
+                        'type': 'new_alert',
+                        'data': alert_data,
+                        'timestamp': timezone.now().isoformat()
+                    }
+                }
+            )
         
         # 转发消息
         await self.channel_layer.group_send(
@@ -357,6 +392,27 @@ class TerminalConsumer(AsyncWebsocketConsumer):
             }
         )
     
+    async def handle_client_command(self, data):
+        """处理来自前端客户端的命令请求，转发到检测端"""
+        command = data.get('command')
+        params = data.get('params', {})
+        
+        if not command:
+            return
+        
+        logger.info(f"收到客户端命令请求，转发到终端 {self.terminal_id}: {command}")
+        
+        # 通过组发送命令到检测端
+        await self.channel_layer.group_send(
+            self.group_name,
+            {
+                'type': 'send_command',
+                'command': command,
+                'params': params,
+                'timestamp': timezone.now().isoformat()
+            }
+        )
+
     async def broadcast_message(self, event):
         """广播消息到WebSocket客户端"""
         # 检查是否应该排除当前连接
@@ -517,6 +573,121 @@ class TerminalConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"更新节点数据失败: {str(e)}")
             return []
+    
+    @database_sync_to_async
+    def check_and_create_alerts(self, nodes_data):
+        """检查节点数据是否超阈值，自动创建告警"""
+        # 告警阈值配置
+        CROWD_WARNING = 80      # 人流量警告阈值
+        CROWD_CRITICAL = 120    # 人流量严重阈值
+        TEMP_HIGH = 35.0        # 高温警告阈值
+        TEMP_LOW = 5.0          # 低温警告阈值
+        HUMIDITY_HIGH = 85.0    # 高湿度警告
+        
+        # 防抖：同一区域同一类型的告警在30分钟内不重复创建
+        ALERT_COOLDOWN = timedelta(minutes=30)
+        
+        alerts_created = []
+        
+        for node_data in nodes_data:
+            node_id = node_data.get('id')
+            if not node_id:
+                continue
+            
+            try:
+                node = HardwareNode.objects.get(id=node_id)
+                area = Area.objects.get(bound_node=node)
+            except (HardwareNode.DoesNotExist, Area.DoesNotExist):
+                continue
+            
+            detected_count = node_data.get('detected_count')
+            temperature = node_data.get('temperature')
+            humidity = node_data.get('humidity')
+            
+            # 检查人流量告警
+            if detected_count is not None:
+                if detected_count >= CROWD_CRITICAL:
+                    alert_info = self._try_create_alert(
+                        area, 'crowd', 3,
+                        f"严重：{area.name} 当前人数 {detected_count} 人，"
+                        f"已超过严重阈值（{CROWD_CRITICAL}人），请立即疏导！",
+                        ALERT_COOLDOWN
+                    )
+                    if alert_info:
+                        alerts_created.append(alert_info)
+                elif detected_count >= CROWD_WARNING:
+                    alert_info = self._try_create_alert(
+                        area, 'crowd', 2,
+                        f"警告：{area.name} 当前人数 {detected_count} 人，"
+                        f"已超过警告阈值（{CROWD_WARNING}人），请注意人流管控。",
+                        ALERT_COOLDOWN
+                    )
+                    if alert_info:
+                        alerts_created.append(alert_info)
+            
+            # 检查温度告警
+            if temperature is not None:
+                if temperature >= TEMP_HIGH:
+                    alert_info = self._try_create_alert(
+                        area, 'other', 2,
+                        f"警告：{area.name} 当前温度 {temperature}°C，已超过高温阈值（{TEMP_HIGH}°C）。",
+                        ALERT_COOLDOWN
+                    )
+                    if alert_info:
+                        alerts_created.append(alert_info)
+                elif temperature <= TEMP_LOW:
+                    alert_info = self._try_create_alert(
+                        area, 'other', 2,
+                        f"警告：{area.name} 当前温度 {temperature}°C，已低于低温阈值（{TEMP_LOW}°C）。",
+                        ALERT_COOLDOWN
+                    )
+                    if alert_info:
+                        alerts_created.append(alert_info)
+            
+            # 检查湿度告警
+            if humidity is not None and humidity >= HUMIDITY_HIGH:
+                alert_info = self._try_create_alert(
+                    area, 'other', 1,
+                    f"注意：{area.name} 当前湿度 {humidity}%，已超过高湿度阈值（{HUMIDITY_HIGH}%）。",
+                    ALERT_COOLDOWN
+                )
+                if alert_info:
+                    alerts_created.append(alert_info)
+        
+        return alerts_created
+    
+    def _try_create_alert(self, area, alert_type, grade, message, cooldown):
+        """尝试创建告警（带防抖），返回告警数据字典或None"""
+        # 检查是否在冷却期内已有同类型告警
+        recent = Alert.objects.filter(
+            area=area,
+            alert_type=alert_type,
+            solved=False,
+            timestamp__gte=timezone.now() - cooldown
+        ).exists()
+        
+        if recent:
+            return None
+        
+        alert = Alert.objects.create(
+            area=area,
+            alert_type=alert_type,
+            grade=grade,
+            publicity=True,
+            message=message
+        )
+        logger.info(f"自动创建告警: [{alert.get_alert_type_display()}] {area.name} - 等级{grade}")
+        
+        return {
+            'id': alert.id,
+            'area_id': area.id,
+            'area_name': area.name,
+            'alert_type': alert_type,
+            'grade': grade,
+            'message': message,
+            'solved': False,
+            'timestamp': alert.timestamp.isoformat()
+        }
     
     @database_sync_to_async
     def update_terminal_last_active(self, terminal_id):
