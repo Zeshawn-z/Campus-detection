@@ -2,7 +2,7 @@ name: Build Frontend
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
     paths:
       - 'front_end/**'
   workflow_dispatch:
