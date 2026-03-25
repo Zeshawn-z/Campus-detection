@@ -25,8 +25,8 @@
           <div class="step-header">
             <span class="step-title">{{ getStepTitle(step) }}</span>
             <span v-if="step.intent" class="step-intent">({{ step.intent }})</span>
-            <span v-if="step.tool" class="step-tool">({{ step.tool }})</span>
-            <span v-if="step.model" class="step-model">({{ step.model }})</span>
+            <span v-if="step.tool" class="step-tool">{{ step.tool }}</span>
+            <span v-if="step.model" class="step-model">{{ step.model }}</span>
             <span class="step-actions">
               <el-button
                 v-if="shouldShowDetailToggle(step)"
@@ -35,12 +35,20 @@
                 size="small"
                 @click="toggleThought(index)"
               >
-                {{ expandedThoughts.includes(index) ? '隐藏详情' : '查看详情' }}
+                {{ expandedThoughts.includes(index) ? '收起' : '详情' }}
               </el-button>
             </span>
           </div>
 
-          <!-- 流式生成文本（仅非LLM步骤显示，且排除规划类，避免与规划区重复） -->
+          <!-- 步骤消息摘要（显示在标题下方，仅当有消息且非标题重复时） -->
+          <div v-if="step.message && !isTitleEqualsMessage(step)" class="step-message">{{ step.message }}</div>
+
+          <!-- 规划进度流式文本（仅规划类步骤） -->
+          <div v-if="(step.type === 'agent_planning' || step.type === 'agent_replanning') && step.content" class="planning-progress-content">
+            <div class="planning-text" v-html="formatContent(step.content)"></div>
+          </div>
+
+          <!-- 流式生成文本（排除规划类和LLM步骤，避免重复） -->
           <div v-if="step.content && !isLLMStep(step) && step.type !== 'agent_planning' && step.type !== 'agent_replanning'" class="step-streaming-content">
             <div class="content-label">AI回答：</div>
             <div class="content-text" v-html="formatContent(step.content)"></div>
@@ -49,7 +57,6 @@
 
           <!-- 思考过程 -->
           <div v-if="step.type === 'thought' && step.data" class="thought-details">
-            <!-- 移除按钮，保留展开内容 -->
             <div v-if="expandedThoughts.includes(index)" class="thought-content">
               <div v-if="typeof step.data === 'string'" class="thought-text">
                 {{ step.data }}
@@ -60,7 +67,6 @@
 
           <!-- 计划详情 -->
           <div v-if="step.type === 'plan' && step.data" class="thought-details">
-            <!-- 移除按钮，保留展开内容 -->
             <div v-if="expandedThoughts.includes(index)" class="thought-content">
               <template v-if="typeof step.data === 'object'">
                 <div class="thought-text" v-if="step.data.action">行动：{{ step.data.action }}</div>
@@ -98,10 +104,9 @@
               <div v-else class="thought-text">{{ String(step.data) }}</div>
             </div>
           </div>
-          <div v-if="step.message">{{ step.message }}</div>
+
           <!-- 工具执行详情 -->
           <div v-if="step.type === 'tool_execution' && step.data" class="thought-details">
-            <!-- 移除按钮，保留展开内容 -->
             <div v-if="expandedThoughts.includes(index)" class="thought-content">
               <template v-if="typeof step.data === 'object'">
                 <div class="thought-text" v-if="step.tool">工具：{{ step.tool }}</div>
@@ -123,14 +128,13 @@
 
           <!-- 观察结果详情 -->
           <div v-if="step.type === 'observation' && step.data" class="thought-details">
-            <!-- 移除按钮，保留展开内容 -->
             <div v-if="expandedThoughts.includes(index)" class="thought-content">
               <template v-if="typeof step.data === 'object'">
-                <div class="thought-text">结果：{{ step.data.success ? '成功' : '失败' }}</div>
+                <div class="thought-text">结果：{{ step.data.success ? '✅ 成功' : '❌ 失败' }}</div>
                 <div class="thought-text" v-if="step.data.error">错误：{{ step.data.error }}</div>
                 <template v-if="step.data.result_preview && !step.data.error">
                   <div class="kv-title">结果预览</div>
-                  <div v-if="typeof step.data.result_preview === 'string'" class="thought-text">{{ step.data.result_preview }}</div>
+                  <div v-if="typeof step.data.result_preview === 'string'" class="thought-text result-preview">{{ step.data.result_preview }}</div>
                   <ul v-else-if="typeof step.data.result_preview === 'object'" class="kv-list">
                     <li v-for="(val, key) in step.data.result_preview" :key="String(key)" class="kv-item">
                       <span class="kv-key">{{ String(key) }}</span>
@@ -391,7 +395,16 @@ const extractToolCallArgs = (call: any): Record<string, any> | null => {
   return (args && typeof args === 'object') ? args : null
 }
 
-// 哪些步骤显示“详情”切换按钮（统一放到标题行右侧）
+// 判断步骤标题与 message 是否相同（避免重复展示）
+const isTitleEqualsMessage = (step: ProcessingStep): boolean => {
+  if (!step.message) return false
+  const title = getStepTitle(step)
+  // 同时比对去尾省略号/标点后的文本
+  const normalize = (s: string) => s.replace(/[…。.!！]+$/g, '').trim()
+  return normalize(title) === normalize(step.message)
+}
+
+// 哪些步骤显示"详情"切换按钮（统一放到标题行右侧）
 const shouldShowDetailToggle = (step: ProcessingStep) => {
   if (!step) return false
   if (step.type === 'thought') return !!step.data
@@ -464,7 +477,8 @@ const shouldShowDetailToggle = (step: ProcessingStep) => {
 
 .step-icon { font-size: 14px; color: #909399; }
 .step-title { font-weight: 600; color: #303133; }
-.step-message { color: #606266; word-break: break-word; }
+.step-message { color: #909399; font-size: 12px; margin-top: 2px; word-break: break-word; }
+.result-preview { background: #f6f8fa; padding: 6px 8px; border-radius: 4px; font-size: 12px; margin-top: 4px; word-break: break-all; }
 
 .step-item.step-active {
   background: rgba(64,158,255,0.06);

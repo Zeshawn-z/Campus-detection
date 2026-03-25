@@ -341,18 +341,35 @@ async def stream_route_and_respond(user_input: str, history: List[Dict] | None =
                 "model": planner_model  # 新增：标注使用的规划模型
             }, ensure_ascii=False) + "\n"
             
-            # 流式规划，实时输出思考过程
+            # 流式规划，实时输出思考过程（带批量缓冲，减少前端重渲染）
             plan = {}
+            _progress_buf = ""
+            _PROGRESS_FLUSH_SIZE = 80  # 每累积80字符刷一次
             async for event_type, data in _llm_plan_next_action_streaming(user_input, history_text, observations, planner_model):
                 if event_type == "thinking_chunk":
-                    # 输出实时思考过程
-                    yield json.dumps({
-                        "type": "planning_progress",
-                        "content": data
-                    }, ensure_ascii=False) + "\n"
+                    _progress_buf += data
+                    if len(_progress_buf) >= _PROGRESS_FLUSH_SIZE:
+                        yield json.dumps({
+                            "type": "planning_progress",
+                            "content": _progress_buf
+                        }, ensure_ascii=False) + "\n"
+                        _progress_buf = ""
                 elif event_type == "final_plan":
+                    # 刷出剩余缓冲
+                    if _progress_buf:
+                        yield json.dumps({
+                            "type": "planning_progress",
+                            "content": _progress_buf
+                        }, ensure_ascii=False) + "\n"
+                        _progress_buf = ""
                     plan = data
                     break
+            # 规划结束后兜底刷出
+            if _progress_buf:
+                yield json.dumps({
+                    "type": "planning_progress",
+                    "content": _progress_buf
+                }, ensure_ascii=False) + "\n"
             
             # 步骤3: 展示思考过程
             yield json.dumps({
@@ -473,8 +490,17 @@ async def stream_route_and_respond(user_input: str, history: List[Dict] | None =
             SystemMessage(content="你是校园智能助手“云小瞻”。请基于规划大纲与可用信息生成最终回答。允许自由问答，不限于校园领域；除非涉及受限内容，否则不要拒绝。"),
             HumanMessage(content=context)
         ]
+        _content_buf = ""
+        _CONTENT_FLUSH_SIZE = 40
         async for chunk in stream_chat_response(messages, temperature=0.5, model_type=generation_model):
-            yield json.dumps({"type": "content", "text": chunk}, ensure_ascii=False) + "\n"
+            _content_buf += chunk
+            # 按量或遇到换行即刷出
+            if len(_content_buf) >= _CONTENT_FLUSH_SIZE or '\n' in _content_buf:
+                yield json.dumps({"type": "content", "text": _content_buf}, ensure_ascii=False) + "\n"
+                _content_buf = ""
+        # 刷出剩余
+        if _content_buf:
+            yield json.dumps({"type": "content", "text": _content_buf}, ensure_ascii=False) + "\n"
 
         # 步骤8: 结束标识
         yield json.dumps({

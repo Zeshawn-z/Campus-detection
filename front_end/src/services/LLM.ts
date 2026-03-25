@@ -1,6 +1,6 @@
 /**
  * LLM 服务模块
- * 提供与 LLM 后端 API 通信的功能
+ * 提供与 LLM 后端 API 通信的功能，支持对话持久化
  */
 import { http } from '../network';
 import { API_BASE_URL } from '../network/axios';
@@ -13,6 +13,34 @@ export interface ChatMessage {
 
 // 聊天历史
 export type ChatHistory = ChatMessage[];
+
+// 会话信息
+export interface ChatSessionInfo {
+  id: number;
+  session_id: string;
+  title: string;
+  model_type: string;
+  created_at: string;
+  updated_at: string;
+  is_archived: boolean;
+  message_count: number;
+  last_message?: {
+    role: string;
+    content: string;
+    created_at: string;
+  };
+}
+
+// 会话详情（含消息列表）
+export interface ChatSessionDetail extends ChatSessionInfo {
+  messages: Array<{
+    id: number;
+    role: string;
+    content: string;
+    metadata: Record<string, any>;
+    created_at: string;
+  }>;
+}
 
 // API 响应类型
 interface LLMChatResponse {
@@ -29,6 +57,13 @@ interface LLMRecommendationResponse {
 
 // LLM 基础 URL
 const LLM_BASE_URL = API_BASE_URL + 'api/llm';
+
+/**
+ * 生成唯一的会话ID
+ */
+export function generateSessionId(): string {
+  return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
+}
 
 /**
  * 发送聊天消息（非流式）
@@ -48,8 +83,7 @@ export async function sendChatMessage(message: string, history: ChatHistory = []
 }
 
 /**
- * 创建SSE流式聊天连接
- * 完全重构，匹配后端响应格式，并增强思考过程数据处理
+ * 创建SSE流式聊天连接（支持会话持久化）
  */
 export function createChatStream(
   message: string,
@@ -57,7 +91,8 @@ export function createChatStream(
   onMessage: (data: any) => void,
   onError: (error: any) => void,
   onEnd: () => void,
-  modelType?: string
+  modelType?: string,
+  sessionId?: string
 ): AbortController {
   // 创建中止控制器
   const controller = new AbortController();
@@ -66,10 +101,11 @@ export function createChatStream(
   // 发送请求
   (async () => {
     try {
-      console.log('发送LLM请求', { message, history, modelType });
+      console.log('发送LLM请求', { message, history, modelType, sessionId });
 
       const bodyPayload: any = { message, history };
       if (modelType) bodyPayload.model_type = modelType;
+      if (sessionId) bodyPayload.session_id = sessionId;
 
       const response = await fetch(`${LLM_BASE_URL}/chat/`, {
         method: 'POST',
@@ -103,14 +139,22 @@ export function createChatStream(
         // 解码二进制数据
         buffer += decoder.decode(value, { stream: true });
         
-        // 处理完整的SSE消息 - 支持多种换行符
-        const lines = buffer.split(/\n+/);
-        buffer = lines.pop() || ''; // 保留可能不完整的最后一行
+        // 按换行符逐行切分，最后一行可能不完整需保留
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
         
         for (const line of lines) {
+          const trimmed = line.trim();
+          
+          // 空行 / 注释行跳过（SSE 标准）
+          if (!trimmed || trimmed.startsWith(':')) continue;
+          
           // 识别SSE数据行
-          if (line.startsWith('data:')) {
-            const data = line.substring(5).trim();
+          if (trimmed.startsWith('data:')) {
+            const data = trimmed.substring(5).trim();
+            
+            // 空 data 域跳过
+            if (!data) continue;
             
             // 检查是否为结束标记
             if (data === '[DONE]') {
@@ -124,16 +168,13 @@ export function createChatStream(
               
               // 特殊处理思考过程数据，确保前端能有效展示
               if (parsedData.type === 'thought' && parsedData.data) {
-                // 确保思考数据能被正确传递和展示
                 try {
                   if (typeof parsedData.data === 'string') {
-                    // 如果是字符串，尝试解析为JSON
                     const jsonData = JSON.parse(parsedData.data);
                     parsedData.data = jsonData;
                   }
                 } catch (e) {
-                  // 如果解析失败，保持原样
-                  console.debug('思考数据解析失败，保持原始格式', e);
+                  // 保持原始字符串格式
                 }
               }
               
@@ -156,7 +197,22 @@ export function createChatStream(
               onMessage(parsedData);
             } catch (e) {
               console.warn('SSE数据解析失败', e, data);
-              // 即使解析失败也尝试传递原始文本
+              // 非 JSON 数据作为内容文本传递
+              onMessage({ type: 'content', text: data });
+            }
+          }
+        }
+      }
+      
+      // 处理 buffer 中可能残留的最后一条消息
+      if (buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed.startsWith('data:')) {
+          const data = trimmed.substring(5).trim();
+          if (data && data !== '[DONE]') {
+            try {
+              onMessage(JSON.parse(data));
+            } catch (e) {
               onMessage({ type: 'content', text: data });
             }
           }
@@ -177,9 +233,62 @@ export function createChatStream(
   return controller;
 }
 
+// ============ 对话会话管理 API ============
+
+/**
+ * 获取用户的对话会话列表
+ */
+export async function getChatSessions(): Promise<ChatSessionInfo[]> {
+  try {
+    const response = await http.get<ChatSessionInfo[]>(`${LLM_BASE_URL}/sessions/`);
+    return response || [];
+  } catch (error) {
+    console.error('获取会话列表失败:', error);
+    return [];
+  }
+}
+
+/**
+ * 获取单个会话的详细信息（含消息历史）
+ */
+export async function getChatSessionDetail(sessionId: string): Promise<ChatSessionDetail | null> {
+  try {
+    return await http.get<ChatSessionDetail>(`${LLM_BASE_URL}/sessions/${sessionId}/`);
+  } catch (error) {
+    console.error('获取会话详情失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 删除对话会话
+ */
+export async function deleteChatSession(sessionId: string): Promise<boolean> {
+  try {
+    await http.delete(`${LLM_BASE_URL}/sessions/${sessionId}/`);
+    return true;
+  } catch (error) {
+    console.error('删除会话失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 更新会话标题
+ */
+export async function updateChatSessionTitle(sessionId: string, title: string): Promise<ChatSessionInfo | null> {
+  try {
+    return await http.patch<ChatSessionInfo>(`${LLM_BASE_URL}/sessions/${sessionId}/`, { title });
+  } catch (error) {
+    console.error('更新会话标题失败:', error);
+    return null;
+  }
+}
+
+// ============ 其他 API ============
+
 /**
  * 获取区域信息
- * 使用通用 HTTP 工具
  */
 export async function getAreaInfo(areaId: number): Promise<any> {
   try {
@@ -192,11 +301,9 @@ export async function getAreaInfo(areaId: number): Promise<any> {
 
 /**
  * 获取推荐区域
- * 使用通用 HTTP 工具
  */
 export async function getSuggestedAreas(limit: number = 5): Promise<any[]> {
   try {
-    // 添加类型断言解决属性访问问题
     const response = await http.get<LLMRecommendationResponse>(`${LLM_BASE_URL}/recommendations/user/`, { limit });
     return response.data || [];
   } catch (error) {
@@ -207,7 +314,6 @@ export async function getSuggestedAreas(limit: number = 5): Promise<any[]> {
 
 /**
  * 获取LLM模型信息
- * 使用通用 HTTP 工具
  */
 export async function getModelInfo(): Promise<any> {
   try {

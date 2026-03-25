@@ -70,8 +70,16 @@ async def get_agent_response(
             }, ensure_ascii=False) + "\n"
             await asyncio.sleep(0)
 
+            _buf = ""
+            _FLUSH_SIZE = 40
             async for chunk in stream_chat_response(msg_list, temperature=temperature, model_type=(model_type or "fast")):
-                yield json.dumps({"type": "content", "text": chunk}, ensure_ascii=False) + "\n"
+                _buf += chunk
+                if len(_buf) >= _FLUSH_SIZE or '\n' in _buf:
+                    yield json.dumps({"type": "content", "text": _buf}, ensure_ascii=False) + "\n"
+                    await asyncio.sleep(0)
+                    _buf = ""
+            if _buf:
+                yield json.dumps({"type": "content", "text": _buf}, ensure_ascii=False) + "\n"
                 await asyncio.sleep(0)
 
             yield json.dumps({"type": "chain_end", "message": "✅ 处理完成"}, ensure_ascii=False) + "\n"
