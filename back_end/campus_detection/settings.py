@@ -243,6 +243,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'webapi.tasks.check_terminal_connections',
         'schedule': 60.0,  # 每分钟执行一次
     },
+    'generate_realtime_data_snapshot': {
+        'task': 'webapi.tasks.generate_realtime_data_snapshot',
+        'schedule': 1800.0,  # 每30分钟执行一次
+    },
 }
 
 

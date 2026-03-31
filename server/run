@@ -6,10 +6,14 @@ SOCKET_DIR="/run/gunicorn"
 SOCKET_FILE="$SOCKET_DIR/gunicorn-campus.sock"
 GUNICORN_SERVICE="campus_backend.service"
 DAPHNE_SERVICE="campus_daphne.service"
+CELERY_WORKER_SERVICE="campus_celery_worker.service"
+CELERY_BEAT_SERVICE="campus_celery_beat.service"
 NGINX_SERVICE="nginx"
 GUNICORN_USER="www-data"
 GUNICORN_GROUP="www-data"
 LOG_DIR="/var/log/gunicorn"
+CELERY_RUN_DIR="/run/celery"
+CELERY_LOG_DIR="/var/log/celery"
 
 echo "🚀 开始部署流程..."
 
@@ -25,6 +29,15 @@ sudo mkdir -p $LOG_DIR
 sudo chown -R $GUNICORN_USER:$GUNICORN_GROUP $LOG_DIR
 sudo chmod 755 $LOG_DIR
 
+# ====== 创建 Celery 运行与日志目录 ======
+echo "🧩 检查并创建 Celery 目录: $CELERY_RUN_DIR, $CELERY_LOG_DIR"
+sudo mkdir -p $CELERY_RUN_DIR
+sudo mkdir -p $CELERY_LOG_DIR
+sudo chown -R $GUNICORN_USER:$GUNICORN_GROUP $CELERY_RUN_DIR
+sudo chown -R $GUNICORN_USER:$GUNICORN_GROUP $CELERY_LOG_DIR
+sudo chmod 775 $CELERY_RUN_DIR
+sudo chmod 755 $CELERY_LOG_DIR
+
 # ====== 重载 systemd 配置 ======
 echo "🔄 重载 systemd..."
 sudo systemctl daemon-reload
@@ -38,6 +51,16 @@ sudo systemctl enable $GUNICORN_SERVICE
 echo "🌐 重启 Daphne 服务: $DAPHNE_SERVICE"
 sudo systemctl restart $DAPHNE_SERVICE
 sudo systemctl enable $DAPHNE_SERVICE
+
+# ====== 重启 Celery Worker 服务 ======
+echo "🧠 重启 Celery Worker 服务: $CELERY_WORKER_SERVICE"
+sudo systemctl restart $CELERY_WORKER_SERVICE
+sudo systemctl enable $CELERY_WORKER_SERVICE
+
+# ====== 重启 Celery Beat 服务 ======
+echo "⏰ 重启 Celery Beat 服务: $CELERY_BEAT_SERVICE"
+sudo systemctl restart $CELERY_BEAT_SERVICE
+sudo systemctl enable $CELERY_BEAT_SERVICE
 
 # ====== 重载 Nginx 配置 ======
 echo "🔁 重新加载 Nginx 配置..."
@@ -58,6 +81,20 @@ if ! sudo systemctl is-active --quiet $DAPHNE_SERVICE; then
     echo "❌ Daphne 启动失败，请检查日志：sudo journalctl -u $DAPHNE_SERVICE -xe"
 else
     echo "✅ Daphne 正在运行"
+fi
+
+echo -e "\n🧠 Celery Worker 状态:"
+if ! sudo systemctl is-active --quiet $CELERY_WORKER_SERVICE; then
+    echo "❌ Celery Worker 启动失败，请检查日志：sudo journalctl -u $CELERY_WORKER_SERVICE -xe"
+else
+    echo "✅ Celery Worker 正在运行"
+fi
+
+echo -e "\n⏰ Celery Beat 状态:"
+if ! sudo systemctl is-active --quiet $CELERY_BEAT_SERVICE; then
+    echo "❌ Celery Beat 启动失败，请检查日志：sudo journalctl -u $CELERY_BEAT_SERVICE -xe"
+else
+    echo "✅ Celery Beat 正在运行"
 fi
 
 echo -e "\n🌍 Nginx 状态:"
