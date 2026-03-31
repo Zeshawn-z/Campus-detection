@@ -330,6 +330,58 @@ def analyze_area_data(area_id):
             alert_message="; ".join(m for m in alert_messages if m) if alert_messages else None
         )
         
+        # 自动创建告警记录：当分析结果为 warning 或 critical 时
+        if alert_level in ("warning", "critical"):
+            from datetime import timedelta as td
+            from django.utils import timezone as tz
+            grade = 3 if alert_level == "critical" else 2
+            combined_msg = "; ".join(m for m in alert_messages if m)
+            
+            # 防抖：1小时内同区域不重复创建 LLM 分析告警
+            recent_alert = Alert.objects.filter(
+                area=area,
+                message__startswith="[AI分析]",
+                timestamp__gte=tz.now() - td(hours=1)
+            ).exists()
+            
+            if not recent_alert:
+                alert = Alert.objects.create(
+                    area=area,
+                    alert_type='other',
+                    grade=grade,
+                    publicity=True,
+                    message=f"[AI分析] {area.name}: {combined_msg}"
+                )
+                logger.info(f"AI分析自动创建告警: {area.name} - 等级{grade}")
+                
+                # 通过 WebSocket 广播新告警到前端
+                try:
+                    from channels.layers import get_channel_layer
+                    from asgiref.sync import async_to_sync
+                    channel_layer = get_channel_layer()
+                    async_to_sync(channel_layer.group_send)(
+                        "system_broadcast",
+                        {
+                            'type': 'broadcast_message',
+                            'message': {
+                                'type': 'new_alert',
+                                'data': {
+                                    'id': alert.id,
+                                    'area_id': area.id,
+                                    'area_name': area.name,
+                                    'alert_type': 'other',
+                                    'grade': grade,
+                                    'message': alert.message,
+                                    'solved': False,
+                                    'timestamp': alert.timestamp.isoformat()
+                                },
+                                'timestamp': tz.now().isoformat()
+                            }
+                        }
+                    )
+                except Exception as ws_err:
+                    logger.warning(f"广播告警到WebSocket失败: {ws_err}")
+        
         logger.info(f"Completed analysis for area: {area.name}")
         return True
     
@@ -514,6 +566,51 @@ def generate_area_usage_pattern(area_id):
         quiet_hours = sorted(daily_pattern.items(), key=lambda x: x[1])[:3]
         quiet_hours = [{"hour": hour, "average_crowd": crowd} for hour, crowd in quiet_hours]
         
+        # 基于数据推算平均停留时长（通过连续非零时段估算）
+        avg_duration = 45.0  # 默认值
+        try:
+            # 计算连续有人时段的平均长度作为粗略停留时间估算
+            hourly_sorted = sorted(daily_pattern.items(), key=lambda x: x[0])
+            active_hours = [h for h, c in hourly_sorted if c > 0]
+            if len(active_hours) >= 2:
+                # 连续活跃小时段数 / 总间隔 * 60 = 估算分钟
+                gaps = []
+                for i in range(1, len(active_hours)):
+                    if active_hours[i] - active_hours[i-1] == 1:
+                        gaps.append(1)
+                if gaps:
+                    avg_duration = round(min(len(gaps) / max(1, len(set(data['date']))) * 60, 180), 1)
+                    avg_duration = max(15.0, avg_duration)  # 最少15分钟
+        except Exception:
+            pass
+        
+        # 使用LLM推断典型用户群体
+        typical_users = "学生、教职工"  # 默认值
+        try:
+            from .utils import run_llm_with_retry
+            from langchain.schema import SystemMessage, HumanMessage
+            
+            building_category = getattr(area.type, 'category', 'other')
+            building_name = area.type.name
+            
+            llm_msg = [
+                SystemMessage(content="你是校园数据分析师。根据区域信息，推断该区域的典型用户群体，直接回答群体名称，用顿号分隔，不超过20字。"),
+                HumanMessage(content=f"区域：{area.name}，建筑：{building_name}，类型：{building_category}，楼层：{area.floor}，日均高峰时段：{[h['hour'] for h in peak_hours]}")
+            ]
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    run_llm_with_retry(llm_msg, temperature=0.2, model_type="fast")
+                )
+                if result and len(result.strip()) < 50:
+                    typical_users = result.strip()
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.warning(f"LLM推断用户群体失败，使用默认值: {e}")
+        
         # 创建或更新区域使用模式
         pattern, created = AreaUsagePattern.objects.update_or_create(
             area=area,
@@ -522,8 +619,8 @@ def generate_area_usage_pattern(area_id):
                 'weekly_pattern': weekly_pattern,
                 'peak_hours': peak_hours,
                 'quiet_hours': quiet_hours,
-                'average_duration': 45.0,  # 假设平均停留时间，实际应该基于更复杂的分析
-                'typical_user_groups': "学生、教职工"  # 假设用户群体，实际应该基于更复杂的分析
+                'average_duration': avg_duration,
+                'typical_user_groups': typical_users
             }
         )
         
@@ -550,6 +647,7 @@ def generate_personalized_recommendations():
             # 获取用户的收藏区域
             favorite_areas = user.favorite_areas.all()
             favorite_building_ids = set(favorite_areas.values_list('type', flat=True))
+            favorite_names = list(favorite_areas.values_list('name', flat=True))
             
             # 如果用户有收藏区域，推荐同类型的其他区域
             recommended_areas = []
@@ -560,7 +658,7 @@ def generate_personalized_recommendations():
                     type__id__in=favorite_building_ids
                 ).exclude(
                     id__in=favorite_areas.values_list('id', flat=True)
-                ).order_by('?')[:3]  # 随机选择3个
+                ).select_related('bound_node', 'type').order_by('?')[:3]
                 
                 recommended_areas.extend(list(similar_areas))
             
@@ -569,7 +667,9 @@ def generate_personalized_recommendations():
                 try:
                     # 获取所有区域的检测到的人数
                     areas_with_data = []
-                    for area in Area.objects.exclude(id__in=[a.id for a in recommended_areas + list(favorite_areas)]):
+                    for area in Area.objects.exclude(
+                        id__in=[a.id for a in recommended_areas + list(favorite_areas)]
+                    ).select_related('bound_node', 'type'):
                         node = area.bound_node
                         if node and node.detected_count is not None:
                             areas_with_data.append({
@@ -593,18 +693,78 @@ def generate_personalized_recommendations():
                 remaining = 3 - len(recommended_areas)
                 random_areas = Area.objects.exclude(
                     id__in=[a.id for a in recommended_areas + list(favorite_areas)]
-                ).order_by('?')[:remaining]
+                ).select_related('bound_node', 'type').order_by('?')[:remaining]
                 
                 recommended_areas.extend(list(random_areas))
             
+            # 使用LLM生成个性化推荐理由
+            area_details = []
+            for area in recommended_areas:
+                node = area.bound_node
+                area_details.append({
+                    "name": area.name,
+                    "building": area.type.name,
+                    "building_category": getattr(area.type, 'category', 'other'),
+                    "floor": area.floor,
+                    "capacity": area.capacity,
+                    "current_count": node.detected_count if node else 0,
+                    "is_same_type": area.type.id in favorite_building_ids
+                })
+            
+            # 调用LLM批量生成推荐理由
+            reasons_map = {}
+            try:
+                from .utils import run_llm_with_retry
+                from langchain.schema import SystemMessage, HumanMessage
+                
+                llm_msg = [
+                    SystemMessage(content=(
+                        "你是校园区域推荐助手。根据用户偏好和区域数据，为每个推荐区域生成简短的推荐理由。"
+                        "回复格式为JSON数组：[{\"name\": \"区域名\", \"reason\": \"推荐理由（20字以内）\", \"score\": 0.8}]"
+                        "score范围0.6-0.95，基于匹配度和实际情况给出。"
+                    )),
+                    HumanMessage(content=(
+                        f"用户收藏的区域：{', '.join(favorite_names) if favorite_names else '无'}\n"
+                        f"待推荐区域：{json.dumps(area_details, ensure_ascii=False)}\n"
+                        f"请生成推荐理由和评分："
+                    ))
+                ]
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(
+                        run_llm_with_retry(llm_msg, temperature=0.4, model_type="fast")
+                    )
+                    # 解析LLM返回的JSON
+                    # 尝试提取JSON数组
+                    import re
+                    json_match = re.search(r'\[.*\]', result, re.DOTALL)
+                    if json_match:
+                        parsed = json.loads(json_match.group())
+                        for item in parsed:
+                            reasons_map[item.get("name", "")] = {
+                                "reason": item.get("reason", ""),
+                                "score": max(0.5, min(0.95, float(item.get("score", 0.75))))
+                            }
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"LLM生成推荐理由失败，使用兜底逻辑: {e}")
+            
             # 创建推荐记录
             for area in recommended_areas:
-                # 生成推荐理由
-                if area.type.id in favorite_building_ids:
-                    reason = f"基于您对{area.type.name}的偏好推荐"
+                # 优先使用LLM生成的理由，兜底使用规则模板
+                llm_result = reasons_map.get(area.name)
+                if llm_result and llm_result.get("reason"):
+                    reason = llm_result["reason"]
+                    score = llm_result["score"]
+                elif area.type.id in favorite_building_ids:
+                    reason = f"基于您对{area.type.name}类场所的偏好推荐"
                     score = 0.85
                 else:
-                    reason = "这个区域当前人流量适中，环境舒适"
+                    count = area.bound_node.detected_count if area.bound_node else 0
+                    reason = f"当前人数{count}人，环境舒适适合使用"
                     score = 0.75
                 
                 # 删除旧的推荐

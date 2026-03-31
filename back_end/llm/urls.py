@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     LLMAnalysisViewSet, UserRecommendationViewSet, AlertAnalysisViewSet,
-    AreaUsagePatternViewSet, GeneratedContentViewSet, AgentChatView
+    AreaUsagePatternViewSet, GeneratedContentViewSet, AgentChatView,
+    ChatSessionListView, ChatSessionDetailView
 )
 
 router = DefaultRouter()
@@ -23,4 +24,7 @@ urlpatterns = [
     path('', include(router.urls)),
     path('chat/', AgentChatView.as_view(), name='agent-chat'),
     path('model-info/', model_info_view, name='model-info'),
+    # 对话会话管理 API
+    path('sessions/', ChatSessionListView.as_view(), name='chat-sessions'),
+    path('sessions/<str:session_id>/', ChatSessionDetailView.as_view(), name='chat-session-detail'),
 ]

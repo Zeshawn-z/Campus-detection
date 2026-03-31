@@ -292,6 +292,9 @@ const inputContainer = ref<HTMLElement | null>(null)
 // 添加abortController引用
 const abortController = ref<AbortController | null>(null)
 
+// 流式内容刷新节流标志
+let _contentRafPending = false
+
 // 默认：分析（无需按钮）
 const selectedModelType = ref<'fast' | 'reasoning' | 'deep_reasoning' | 'analysis'>('analysis')
 const paramModelType = computed(() => selectedModelType.value || 'analysis')
@@ -528,15 +531,17 @@ const processStreamData = (data: any, aiMsg: Message) => {
     aiMsg.content += text
     currentResponse.value += text
 
-    // 不再把生成文本同步到上面的步骤，避免与正式回答重复显示
-    
-    // 强制刷新视图
-    messages.value = [...messages.value]
-    
-    // 始终滚动到底部
-    nextTick(() => {
-      scrollToBottom()
-    })
+    // 使用 requestAnimationFrame 节流：在一帧内合并多次 content 事件的视图刷新
+    if (!_contentRafPending) {
+      _contentRafPending = true
+      requestAnimationFrame(() => {
+        _contentRafPending = false
+        messages.value = [...messages.value]
+        nextTick(() => {
+          scrollToBottom()
+        })
+      })
+    }
     return
   }
   
@@ -570,14 +575,18 @@ const processStreamData = (data: any, aiMsg: Message) => {
     const planningStep = aiMsg.processingSteps[targetIndex]
     planningStep.content = (planningStep.content || '') + progressText
     
-    // 强制刷新视图
-    aiMsg.processingSteps = [...aiMsg.processingSteps]
-    messages.value = [...messages.value]
-    
-    // 滚动到底部
-    nextTick(() => {
-      scrollToBottom()
-    })
+    // 使用 RAF 节流合并视图刷新
+    if (!_contentRafPending) {
+      _contentRafPending = true
+      requestAnimationFrame(() => {
+        _contentRafPending = false
+        aiMsg.processingSteps = [...(aiMsg.processingSteps || [])]
+        messages.value = [...messages.value]
+        nextTick(() => {
+          scrollToBottom()
+        })
+      })
+    }
     return
   }
   
@@ -816,19 +825,11 @@ const renderMarkdown = (content: string): string => {
     marked.setOptions({
       gfm: true,
       breaks: true,
-      // 使用类型断言解决TypeScript警告，同时保留功能
-      headerIds: true,
-      mangle: false,
     } as Parameters<typeof marked.setOptions>[0]);
     
-    // 对文本进行安全转义，但保留markdown语法
-    const escaped = content
-      .replace(/&(?!amp;|lt;|gt;)/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    
-    // 使用marked解析为HTML
-    const html = marked.parse(escaped) as string  // 添加类型断言
+    // 直接将原始内容交给 marked 解析（不预转义 < > ，否则 Markdown 语法全部失效）
+    // XSS 安全由下方 DOMPurify 保障
+    const html = marked.parse(content) as string
 
     // 使用DOMPurify净化HTML，保留足够的标签和属性
     const sanitized = DOMPurify.sanitize(html, {
@@ -836,12 +837,12 @@ const renderMarkdown = (content: string): string => {
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 
         'b', 'i', 'strong', 'em', 'strike', 'code', 'pre', 'hr', 'br', 
         'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'blockquote',
-        'span', 'img'
+        'span', 'img', 'del', 'input', 'sup', 'sub'
       ],
-      ALLOWED_ATTR: ['href', 'target', 'title', 'class', 'id', 'style', 'src', 'alt'],
+      ALLOWED_ATTR: ['href', 'target', 'title', 'class', 'id', 'src', 'alt', 'type', 'checked', 'disabled'],
       ADD_ATTR: ['target'],
-      FORBID_TAGS: ['style', 'script'],
-      FORBID_ATTR: ['style', 'onerror', 'onload']
+      FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form'],
+      FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick', 'onmouseover']
     })
     
     return sanitized
