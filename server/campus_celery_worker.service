@@ -12,9 +12,14 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/Campus-detection/back_end
 Environment=DJANGO_SETTINGS_MODULE=campus_detection.settings
-ExecStart=/var/www/Campus-detection/back_end/venv/bin/celery -A campus_detection worker --loglevel=INFO --pidfile=/run/celery/worker.pid --logfile=/var/log/celery/worker.log
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/var/www/Campus-detection/back_end/venv/bin/celery -A campus_detection worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat --prefetch-multiplier=1 --max-tasks-per-child=50 --loglevel=INFO --pidfile=/run/celery/worker.pid --logfile=/var/log/celery/worker.log
 Restart=always
 RestartSec=5
+CPUQuota=35%
+MemoryMax=450M
+TasksMax=32
+Nice=10
 
 [Install]
 WantedBy=multi-user.target

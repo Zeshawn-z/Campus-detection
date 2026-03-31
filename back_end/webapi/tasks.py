@@ -156,6 +156,13 @@ def _get_area_time_factor(area_type, hour, is_weekend):
         return 0.3
     return 1.0
 
+
+def _is_offline_node(node):
+    if not node:
+        return True
+    node_name = (node.name or '').strip().lower()
+    return node_name == 'none'
+
 @shared_task
 def check_terminal_connections():
     """
@@ -231,10 +238,13 @@ def generate_realtime_data_snapshot():
         area_count = 0
         co2_count = 0
 
-        areas = Area.objects.select_related('bound_node', 'bound_node__terminal').all()
+        # 与批量脚本保持一致：仅生成 id<=19 区域的数据。
+        # 绑定节点为空视为离线区域，直接跳过。
+        areas = Area.objects.select_related('bound_node', 'bound_node__terminal').filter(id__lte=19)
         for area in areas:
             node = area.bound_node
-            if not node:
+            if _is_offline_node(node):
+                logger.debug("区域 %s 绑定离线节点(空或名称None)，跳过实时更新", area.id)
                 continue
 
             area_type, base_factor = _get_area_type_factor(area.name)
