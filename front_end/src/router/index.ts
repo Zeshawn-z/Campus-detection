@@ -10,7 +10,7 @@ import UserView from '../views/UserView.vue';
 import AlertNotice from "../views/AlertNotice.vue";
 import NotFound from "../views/NotFound.vue";
 import TerminalView from '../views/TerminalView.vue';
-import LLMView from '../views/LLMView.vue';
+import AgentChatView from '../views/agent/AgentChatView.vue';
 import { useAuthStore } from '../stores/auth'
 import TerminalForPi from '../views/TerminalForPi.vue';
 
@@ -27,7 +27,7 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/ai',
     name: 'AI',
-    component: LLMView,
+    component: AgentChatView,
   },
   {
     path: '/areas',

@@ -55,6 +55,59 @@ interface LLMRecommendationResponse {
   status?: string;
 }
 
+export interface AreaAIAnalysis {
+  id: number;
+  area: number;
+  area_name: string;
+  area_location: string;
+  timestamp: string;
+  analysis_text: string;
+  analysis_data?: string;
+  parsed_data?: any;
+  alert_status?: string;
+  alert_message?: string;
+}
+
+export interface AreaUsagePattern {
+  id: number;
+  area: number;
+  area_name: string;
+  building_name: string;
+  daily_pattern: any;
+  weekly_pattern: any;
+  peak_hours: any;
+  quiet_hours: any;
+  average_duration: number;
+  typical_user_groups: string;
+  last_updated: string;
+}
+
+export interface AlertAIAnalysis {
+  id: number;
+  alert: number;
+  alert_type: string;
+  area_name: string;
+  alert_grade: number;
+  alert_message: string;
+  analysis_text: string;
+  priority_score: number;
+  handling_suggestions: string;
+  potential_causes: string;
+  timestamp: string;
+}
+
+export interface GeneratedNotice {
+  id: number;
+  content_type: string;
+  content_type_display: string;
+  title: string;
+  content: string;
+  related_area: number | null;
+  area_name: string | null;
+  generated_at: string;
+  published: boolean;
+}
+
 // LLM 基础 URL
 const LLM_BASE_URL = API_BASE_URL + 'api/llm';
 
@@ -322,5 +375,43 @@ export async function getModelInfo(): Promise<any> {
     console.error('获取模型信息失败:', error);
     throw error;
   }
+}
+
+/**
+ * 获取区域最新AI分析结果
+ */
+export async function getLatestAreaAnalysis(areaId: number): Promise<AreaAIAnalysis> {
+  return await http.get<AreaAIAnalysis>(`${LLM_BASE_URL}/analysis/${areaId}/latest-analysis/`);
+}
+
+/**
+ * 触发区域AI分析任务
+ */
+export async function triggerAreaAnalysis(areaId: number): Promise<{ message?: string; status?: string }> {
+  return await http.post<{ message?: string; status?: string }>(`${LLM_BASE_URL}/analysis/${areaId}/analyze/`, {});
+}
+
+/**
+ * 获取区域使用模式分析
+ */
+export async function getAreaUsagePattern(areaId: number): Promise<AreaUsagePattern | { status?: string; message?: string; data?: AreaUsagePattern }> {
+  return await http.get<AreaUsagePattern | { status?: string; message?: string; data?: AreaUsagePattern }>(`${LLM_BASE_URL}/usage-patterns/area/${areaId}/`);
+}
+
+/**
+ * 获取告警AI分析
+ */
+export async function getAlertAIAnalysis(alertId: number): Promise<AlertAIAnalysis | { status?: string; message?: string }> {
+  return await http.get<AlertAIAnalysis | { status?: string; message?: string }>(`${LLM_BASE_URL}/alert-analysis/alert/${alertId}/`);
+}
+
+/**
+ * 生成区域AI公告
+ */
+export async function generateAreaNotice(areaId: number, noticeType: 'status' | 'alert' | 'maintenance' = 'status'): Promise<GeneratedNotice> {
+  return await http.post<GeneratedNotice>(`${LLM_BASE_URL}/generated-content/generate/notice/`, {
+    area_id: areaId,
+    notice_type: noticeType,
+  });
 }
 

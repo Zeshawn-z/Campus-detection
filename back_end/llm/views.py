@@ -336,6 +336,8 @@ class AgentChatView(View):
         async def stream_generator():
             full_response = ""
             try:
+                # 首包心跳，尽早促使网关/浏览器建立并刷新SSE流。
+                yield ": stream-start\n\n"
                 async for chunk in get_agent_response(user_message, chat_history, model_type=model_type):
                     data_out = chunk if isinstance(chunk, str) else json.dumps(chunk, ensure_ascii=False)
                     
@@ -403,16 +405,26 @@ class ChatSessionListView(APIView):
 
 class ChatSessionDetailView(APIView):
     """获取单个会话的详细信息（含消息列表）"""
+
+    @staticmethod
+    def _enforce_session_permission(request, session):
+        """仅会话所属用户可访问其会话；匿名会话可基于 session_id 访问。"""
+        if session.user:
+            if not request.user.is_authenticated:
+                return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+            if session.user != request.user:
+                return Response({"error": "无权访问此会话"}, status=status.HTTP_403_FORBIDDEN)
+        return None
     
     def get(self, request, session_id):
         try:
             session = ChatSession.objects.get(session_id=session_id)
         except ChatSession.DoesNotExist:
             return Response({"error": "会话不存在"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # 检查权限：只能查看自己的会话
-        if session.user and request.user.is_authenticated and session.user != request.user:
-            return Response({"error": "无权访问此会话"}, status=status.HTTP_403_FORBIDDEN)
+
+        permission_error = self._enforce_session_permission(request, session)
+        if permission_error:
+            return permission_error
         
         serializer = ChatSessionDetailSerializer(session)
         return Response(serializer.data)
@@ -423,9 +435,10 @@ class ChatSessionDetailView(APIView):
             session = ChatSession.objects.get(session_id=session_id)
         except ChatSession.DoesNotExist:
             return Response({"error": "会话不存在"}, status=status.HTTP_404_NOT_FOUND)
-        
-        if session.user and request.user.is_authenticated and session.user != request.user:
-            return Response({"error": "无权删除此会话"}, status=status.HTTP_403_FORBIDDEN)
+
+        permission_error = self._enforce_session_permission(request, session)
+        if permission_error:
+            return permission_error
         
         ChatMemoryStore.delete_session(session_id)
         return Response({"message": "会话已删除"}, status=status.HTTP_204_NO_CONTENT)
@@ -436,9 +449,10 @@ class ChatSessionDetailView(APIView):
             session = ChatSession.objects.get(session_id=session_id)
         except ChatSession.DoesNotExist:
             return Response({"error": "会话不存在"}, status=status.HTTP_404_NOT_FOUND)
-        
-        if session.user and request.user.is_authenticated and session.user != request.user:
-            return Response({"error": "无权修改此会话"}, status=status.HTTP_403_FORBIDDEN)
+
+        permission_error = self._enforce_session_permission(request, session)
+        if permission_error:
+            return permission_error
         
         title = request.data.get('title')
         if title:
