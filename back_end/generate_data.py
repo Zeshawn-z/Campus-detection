@@ -2,7 +2,7 @@
 """
 数据批量生成脚本 - 复杂版
 考虑季节、月份、节假日、时间段等多重影响因素
-使用UTC+8时间
+按 Django 项目时区生成时间因子（如 Asia/Shanghai）
 """
 
 import os
@@ -201,8 +201,7 @@ def generate_historical_data(days=30, records_per_day=48):
         return
 
     total_records = 0
-    # 使用UTC+8时间
-    end_time = timezone.now() + timedelta(hours=8)
+    end_time = timezone.now()
     start_time = end_time - timedelta(days=days)
     interval = timedelta(minutes=1440 / records_per_day)  # 每天均匀分布
 
@@ -214,8 +213,8 @@ def generate_historical_data(days=30, records_per_day=48):
 
         current_time = start_time
         while current_time < end_time:
-            # 直接使用UTC+8时间
-            local_time = current_time
+            # 用项目时区计算小时/周末等因子，避免手动+8造成偏移
+            local_time = timezone.localtime(current_time)
             date = local_time.date()
             hour = local_time.hour
             weekday = local_time.weekday()
@@ -241,7 +240,7 @@ def generate_historical_data(days=30, records_per_day=48):
             random_factor = 0.8 + random.random() * 0.4
             final_count = max(1, int(final_count * random_factor * area_specific_factor))
 
-            # 创建记录（使用UTC+8时间）
+            # 记录时间使用 timezone aware datetime（由 Django 统一处理时区）
             HistoricalData.objects.create(
                 area=area,
                 detected_count=final_count,
@@ -265,8 +264,7 @@ def generate_temperature_humidity_data(days=30, records_per_day=48):
         return
 
     total_records = 0
-    # 使用UTC+8时间
-    end_time = timezone.now() + timedelta(hours=8)
+    end_time = timezone.now()
     start_time = end_time - timedelta(days=days)
     interval = timedelta(minutes=1440 / records_per_day)
 
@@ -275,8 +273,7 @@ def generate_temperature_humidity_data(days=30, records_per_day=48):
 
         current_time = start_time
         while current_time < end_time:
-            # 直接使用UTC+8时间
-            local_time = current_time
+            local_time = timezone.localtime(current_time)
             date = local_time.date()
             hour = local_time.hour
 
@@ -310,7 +307,7 @@ def generate_temperature_humidity_data(days=30, records_per_day=48):
                 area=area,
                 temperature=round(temperature, 1),
                 humidity=round(humidity, 1),
-                timestamp=current_time  # 使用UTC+8时间
+                timestamp=current_time
             )
             total_records += 1
 
@@ -329,8 +326,7 @@ def generate_co2_tvoc_data(days=30, records_per_day=48):
         return
 
     total_records = 0
-    # 使用UTC+8时间
-    end_time = timezone.now() + timedelta(hours=8)
+    end_time = timezone.now()
     start_time = end_time - timedelta(days=days)
     interval = timedelta(minutes=1440 / records_per_day)
 
@@ -339,8 +335,7 @@ def generate_co2_tvoc_data(days=30, records_per_day=48):
 
         current_time = start_time
         while current_time < end_time:
-            # 直接使用UTC+8时间
-            local_time = current_time
+            local_time = timezone.localtime(current_time)
             date = local_time.date()
             hour = local_time.hour
             is_weekend = local_time.weekday() >= 5
@@ -382,7 +377,7 @@ def generate_co2_tvoc_data(days=30, records_per_day=48):
                 terminal=terminal,
                 co2_level=co2_level,
                 tvoc_level=tvoc_level,
-                timestamp=current_time  # 使用UTC+8时间
+                timestamp=current_time
             )
             total_records += 1
 
@@ -400,9 +395,7 @@ def update_hardware_nodes():
         print("警告：系统中没有硬件节点数据")
         return
 
-    # 使用UTC+8时间
-    now = timezone.now() + timedelta(hours=8)
-    # 直接使用UTC+8时间
+    now = timezone.localtime(timezone.now())
     hour = now.hour
     date = now.date()
     is_weekend = now.weekday() >= 5
@@ -472,7 +465,7 @@ def clean_existing_data():
 def main():
     """主函数"""
     print("=" * 60)
-    print("校园检测系统 - 复杂数据生成脚本 (UTC+8时间)")
+    print(f"校园检测系统 - 复杂数据生成脚本 (时区: {timezone.get_current_timezone_name()})")
     print("考虑季节、月份、节假日、时间段等多重影响因素")
     print("=" * 60)
 
@@ -521,7 +514,7 @@ def main():
 
     choice = input("请选择 (1-6): ").strip() or "1"
 
-    print(f"\n将生成 {days} 天的数据，每天 {records_per_day} 条记录（UTC+8时间）")
+    print(f"\n将生成 {days} 天的数据，每天 {records_per_day} 条记录（按项目时区）")
     print("注：数据生成考虑了季节、月份、节假日、时间段等多重影响因素")
 
     # 计算总记录数

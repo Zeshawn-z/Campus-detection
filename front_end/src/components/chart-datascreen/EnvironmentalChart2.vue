@@ -59,6 +59,15 @@ const fetchAreaName = async (areaId: number): Promise<string> => {
   }
 }
 
+const filterDataByHours = <T extends { timestamp: string }>(data: T[], hours: number): T[] => {
+  const endMs = Date.now()
+  const startMs = endMs - hours * 60 * 60 * 1000
+  return data.filter((item) => {
+    const itemMs = new Date(item.timestamp).getTime()
+    return Number.isFinite(itemMs) && itemMs >= startMs && itemMs <= endMs
+  })
+}
+
 // 获取环境数据
 const fetchEnvironmentalData = async (areaId?: number, terminalId?: number, hours = 24) => {
   try {
@@ -76,9 +85,10 @@ const fetchEnvironmentalData = async (areaId?: number, terminalId?: number, hour
           const validData = data.filter(item => 
             item && item.timestamp && item.co2_level !== undefined && item.co2_level !== null
           );
+          const filteredData = filterDataByHours(validData, hours)
           
-          if (validData.length > 0) {
-            co2Data.value = validData.sort((a, b) => 
+          if (filteredData.length > 0) {
+            co2Data.value = filteredData.sort((a, b) => 
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
             );
             // 移除成功日志
@@ -97,9 +107,10 @@ const fetchEnvironmentalData = async (areaId?: number, terminalId?: number, hour
             const validData = data.filter(item => 
               item && item.timestamp && item.co2_level !== undefined && item.co2_level !== null
             );
+            const filteredData = filterDataByHours(validData, hours)
             
-            if (validData.length > 0) {
-              co2Data.value = validData.sort((a, b) => 
+            if (filteredData.length > 0) {
+              co2Data.value = filteredData.sort((a, b) => 
                 new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
               );
              // 立即更新图表
@@ -122,12 +133,18 @@ const fetchEnvironmentalData = async (areaId?: number, terminalId?: number, hour
         // 尝试使用区域API获取温湿度数据
         const data = await areaService.getAreaTemperatureHumidity(areaId, hours)
         if (data && data.length > 0) {
-          temperatureHumidityData.value = data.sort((a, b) => 
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          const filteredData = filterDataByHours(
+            data.filter(item => item && item.timestamp),
+            hours
           )
-          // 立即更新图表
-          updateChart()
-          return
+          if (filteredData.length > 0) {
+            temperatureHumidityData.value = filteredData.sort((a, b) => 
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            )
+            // 立即更新图表
+            updateChart()
+            return
+          }
         }
       } catch (apiError) {
 
@@ -135,12 +152,18 @@ const fetchEnvironmentalData = async (areaId?: number, terminalId?: number, hour
         try {
           const data = await temperatureHumidityService.getByArea(areaId, hours)
           if (data && data.length > 0) {
-            temperatureHumidityData.value = data.sort((a, b) => 
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            const filteredData = filterDataByHours(
+              data.filter(item => item && item.timestamp),
+              hours
             )
-           // 立即更新图表
-            updateChart()
-            return
+            if (filteredData.length > 0) {
+              temperatureHumidityData.value = filteredData.sort((a, b) => 
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              )
+             // 立即更新图表
+              updateChart()
+              return
+            }
           }
         } catch (fallbackError) {
           throw new Error('温湿度数据获取失败')

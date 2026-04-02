@@ -9,7 +9,9 @@ from asgiref.sync import async_to_sync
 from django.core.cache import cache
 import json
 import logging
+from datetime import datetime, time, timedelta
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 from .models import *
 from .serializers import *
 from .permissions import StaffEditSelected
@@ -17,6 +19,61 @@ from .permissions import StaffEditSelected
 
 
 logger = logging.getLogger('django')
+
+
+def _parse_time_range_param(raw_value, end_of_day=False):
+    if not raw_value:
+        return None
+
+    parsed_dt = parse_datetime(raw_value)
+    if parsed_dt is not None:
+        if timezone.is_naive(parsed_dt):
+            parsed_dt = timezone.make_aware(parsed_dt, timezone.get_current_timezone())
+        return parsed_dt
+
+    parsed_date = parse_date(raw_value)
+    if parsed_date is not None:
+        base_time = time.max if end_of_day else time.min
+        parsed_dt = datetime.combine(parsed_date, base_time)
+        return timezone.make_aware(parsed_dt, timezone.get_current_timezone())
+
+    return None
+
+
+def _validated_hours(hours_raw, default_hours=None):
+    if hours_raw is None:
+        return default_hours
+
+    try:
+        hours = int(hours_raw)
+        return hours if hours > 0 else default_hours
+    except (TypeError, ValueError):
+        return default_hours
+
+
+def _apply_time_range_filter(queryset, request, default_hours=None):
+    start_raw = request.query_params.get('start_date') or request.query_params.get('start_time')
+    end_raw = request.query_params.get('end_date') or request.query_params.get('end_time')
+
+    start_dt = _parse_time_range_param(start_raw, end_of_day=False)
+    end_dt = _parse_time_range_param(end_raw, end_of_day=True)
+
+    has_explicit_range = start_dt is not None or end_dt is not None
+    if start_dt is not None:
+        queryset = queryset.filter(timestamp__gte=start_dt)
+    if end_dt is not None:
+        queryset = queryset.filter(timestamp__lte=end_dt)
+
+    if has_explicit_range:
+        return queryset.order_by('timestamp')
+
+    hours = _validated_hours(request.query_params.get('hours'), default_hours)
+    if hours is not None:
+        from_time = timezone.now() - timedelta(hours=hours)
+        queryset = queryset.filter(timestamp__gte=from_time)
+        return queryset.order_by('timestamp')
+
+    return queryset
 
 def get_summary_people_count():
     # 获取所有区域
@@ -83,13 +140,11 @@ class ProcessTerminalViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def co2_data(self, request, pk=None):
         terminal = self.get_object()
-        hours = int(request.query_params.get('hours', 24))
-        from_time = timezone.now() - timezone.timedelta(hours=hours)
-        
-        data = CO2Data.objects.filter(
-            terminal=terminal,
-            timestamp__gte=from_time
-        ).order_by('timestamp')
+        data = _apply_time_range_filter(
+            CO2Data.objects.filter(terminal=terminal),
+            request,
+            default_hours=24,
+        )
         serializer = CO2DataSerializer(data, many=True)
         return Response(serializer.data)
         
@@ -353,20 +408,22 @@ class AreaViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def historical(self, request, pk=None):
         area = self.get_object()
-        historical_data = HistoricalData.objects.filter(area=area)
+        historical_data = _apply_time_range_filter(
+            HistoricalData.objects.filter(area=area),
+            request,
+            default_hours=24,
+        )
         serializer = HistoricalDataSerializer(historical_data, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
     def temperature_humidity(self, request, pk=None):
         area = self.get_object()
-        hours = int(request.query_params.get('hours', 24))
-        from_time = timezone.now() - timezone.timedelta(hours=hours)
-        
-        data = TemperatureHumidityData.objects.filter(
-            area=area,
-            timestamp__gte=from_time
-        ).order_by('timestamp')
+        data = _apply_time_range_filter(
+            TemperatureHumidityData.objects.filter(area=area),
+            request,
+            default_hours=24,
+        )
         serializer = TemperatureHumidityDataSerializer(data, many=True)
         return Response(serializer.data)
 
@@ -413,6 +470,13 @@ class HistoricalDataViewSet(viewsets.ModelViewSet):
     permission_classes = [StaffEditSelected]
     allow_staff_edit = False  # 标记该资源允许 Staff 编辑
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        area_id = self.request.query_params.get('area_id')
+        if area_id:
+            queryset = queryset.filter(area_id=area_id)
+        return _apply_time_range_filter(queryset, self.request, default_hours=None)
+
     @action(detail=False, methods=['get'])
     def latest(self, request):
         count = int(request.query_params.get('count', 5))
@@ -426,6 +490,13 @@ class TemperatureHumidityDataViewSet(viewsets.ModelViewSet):
     serializer_class = TemperatureHumidityDataSerializer
     permission_classes = [StaffEditSelected]
     allow_staff_edit = False
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        area_id = self.request.query_params.get('area_id')
+        if area_id:
+            queryset = queryset.filter(area_id=area_id)
+        return _apply_time_range_filter(queryset, self.request, default_hours=None)
 
     @action(detail=False, methods=['get'])
     def latest(self, request):
@@ -445,13 +516,11 @@ class TemperatureHumidityDataViewSet(viewsets.ModelViewSet):
         except Area.DoesNotExist:
             return Response({"error": "区域不存在"}, status=status.HTTP_404_NOT_FOUND)
         
-        hours = int(request.query_params.get('hours', 24))
-        from_time = timezone.now() - timezone.timedelta(hours=hours)
-        
-        data = self.queryset.filter(
-            area=area,
-            timestamp__gte=from_time
-        ).order_by('timestamp')
+        data = _apply_time_range_filter(
+            self.queryset.filter(area=area),
+            request,
+            default_hours=24,
+        )
         
         serializer = TemperatureHumidityDataSerializer(data, many=True)
         return Response(serializer.data)
@@ -462,6 +531,13 @@ class CO2DataViewSet(viewsets.ModelViewSet):
     serializer_class = CO2DataSerializer
     permission_classes = [StaffEditSelected]
     allow_staff_edit = False
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        terminal_id = self.request.query_params.get('terminal_id')
+        if terminal_id:
+            queryset = queryset.filter(terminal_id=terminal_id)
+        return _apply_time_range_filter(queryset, self.request, default_hours=None)
 
     @action(detail=False, methods=['get'])
     def latest(self, request):
@@ -481,13 +557,11 @@ class CO2DataViewSet(viewsets.ModelViewSet):
         except ProcessTerminal.DoesNotExist:
             return Response({"error": "终端不存在"}, status=status.HTTP_404_NOT_FOUND)
         
-        hours = int(request.query_params.get('hours', 24))
-        from_time = timezone.now() - timezone.timedelta(hours=hours)
-        
-        data = self.queryset.filter(
-            terminal=terminal,
-            timestamp__gte=from_time
-        ).order_by('timestamp')
+        data = _apply_time_range_filter(
+            self.queryset.filter(terminal=terminal),
+            request,
+            default_hours=24,
+        )
         
         serializer = CO2DataSerializer(data, many=True)
         return Response(serializer.data)

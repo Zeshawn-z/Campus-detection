@@ -3,6 +3,7 @@ venv
 temp
 logs
 old
+static/index.html
 static
 captures
 __pycache__
