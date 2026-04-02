@@ -11,6 +11,7 @@ from typing import List, Dict, Any, AsyncGenerator, Optional
 import json
 import logging
 import asyncio
+import uuid
 
 from langchain.schema import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain.prompts import ChatPromptTemplate
@@ -153,7 +154,9 @@ async def _llm_plan_next_action_streaming(
         async for chunk in stream_chat_response(messages, temperature=0.1, model_type=model_for_planning):
             thinking_content += chunk
             if chunk.strip():
-                yield ("thinking_chunk", chunk)
+                for piece in _split_text(chunk, piece_size=8):
+                    if piece:
+                        yield ("thinking_chunk", piece)
 
             # 增量扫描当前chunk，寻找首个平衡JSON
             for ch in chunk:
@@ -312,153 +315,208 @@ async def stream_route_and_respond(user_input: str, history: List[Dict] | None =
     - {"type": "chain_end", "message": "完成"}
     """
     
-    try:
-        # 步骤1: 开始处理
-        yield json.dumps({
-            "type": "chain_start", 
-            "message": "正在处理您的请求..."
-        }, ensure_ascii=False) + "\n"
+    def _event(event_type: str, **kwargs: Any) -> str:
+        payload = {
+            "type": event_type,
+            "event_version": 2,
+            **kwargs,
+        }
+        return json.dumps(payload, ensure_ascii=False) + "\n"
 
-        # 选择阶段模型：若前端指定非"default"，全程使用；否则按阶段选择
+    def _step_id(prefix: str) -> str:
+        return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+    try:
+        yield _event("chain_start", message="正在处理您的请求...")
+
+        # 若前端指定具体模型（非 default），规划与生成都使用同一模型
         use_custom = bool(model_type and model_type != "default")
         planner_model = model_type if use_custom else "fast"
         generation_model = model_type if use_custom else "analysis"
 
-        # 准备历史信息
         history_text = ""
         if history:
-            for msg in history[-5:]:  # 限制历史长度
+            for msg in history[-5:]:
                 role = msg.get("role", "")
                 content = msg.get("content", "")
                 history_text += f"{role}: {content}\n"
-        
+
         observations = ""
-        max_iterations = 3  # 最大迭代次数，防止无限循环
+        max_iterations = 3
         iteration = 0
-        
+        plan: Dict[str, Any] = {}
+
         while iteration < max_iterations:
             iteration += 1
-            
-            # 步骤2: AI规划
-            yield json.dumps({
-                "type": "agent_planning", 
-                "iteration": iteration,
-                "message": "正在分析问题并规划执行步骤...",
-                "model": planner_model  # 新增：标注使用的规划模型
-            }, ensure_ascii=False) + "\n"
-            
-            # 规划阶段仅输出最终可读计划，避免把JSON草稿流式暴露给前端造成步骤噪声。
+            planning_step_id = _step_id("planning")
+
+            yield _event(
+                "step_start",
+                step_id=planning_step_id,
+                step_kind="planning",
+                iteration=iteration,
+                message="正在分析问题并规划执行步骤...",
+                model=planner_model,
+            )
+            # 兼容旧协议
+            yield _event(
+                "agent_planning",
+                iteration=iteration,
+                message="正在分析问题并规划执行步骤...",
+                model=planner_model,
+            )
+
             plan = {}
             async for event_type, data in _llm_plan_next_action_streaming(user_input, history_text, observations, planner_model):
-                if event_type == "final_plan":
-                    plan = data
+                if event_type == "thinking_chunk":
+                    delta = data or ""
+                    if delta:
+                        yield _event("step_delta", step_id=planning_step_id, iteration=iteration, delta=delta)
+                        # 兼容旧协议
+                        yield _event("planning_progress", iteration=iteration, content=delta)
+                        await asyncio.sleep(0)
+                elif event_type == "final_plan":
+                    plan = data or {}
                     break
-            
-            # 步骤3: 展示思考过程
-            yield json.dumps({
-                "type": "thought",
-                "content": plan.get("reasoning", "分析用户需求...")
-            }, ensure_ascii=False) + "\n"
 
-            # 步骤3.5: 输出规划详情（行动与工具调用计划）
+            reasoning = plan.get("reasoning", "分析用户需求...")
+            yield _event(
+                "step_end",
+                step_id=planning_step_id,
+                iteration=iteration,
+                status="success",
+                summary=reasoning,
+            )
+
+            # 兼容旧协议
+            yield _event("thought", content=reasoning)
+
             action = plan.get("action", "direct_response")
             tool_calls = plan.get("tool_calls", [])
             outline = plan.get("outline", None)
-            yield json.dumps({
-                "type": "plan",
-                "iteration": iteration,
-                "action": action,
-                "tool_calls": tool_calls,
-                "outline": outline,
-                "model": planner_model  # 新增：标注规划输出所用模型
-            }, ensure_ascii=False) + "\n"
-            
-            # 根据规划执行不同的行动
+
+            # 兼容旧协议
+            yield _event(
+                "plan",
+                iteration=iteration,
+                action=action,
+                tool_calls=tool_calls,
+                outline=outline,
+                model=planner_model,
+            )
+
             if action == "call_tool":
                 used_fuzzy = False
-                
-                for tool_call in tool_calls:
+
+                for tool_idx, tool_call in enumerate(tool_calls):
                     tool_name = tool_call.get("tool", "")
                     parameters = tool_call.get("parameters", {})
                     tool_reasoning = tool_call.get("reasoning", "")
-                    
-                    # 步骤4: 工具执行
-                    yield json.dumps({
-                        "type": "tool_execution",
-                        "tool": tool_name,
-                        "parameters": parameters,
-                        "message": f"🔧 执行工具: {tool_name}",
-                        "reasoning": tool_reasoning
-                    }, ensure_ascii=False) + "\n"
-                    
-                    # 执行工具
+                    tool_step_id = _step_id("tool")
+
+                    yield _event(
+                        "step_start",
+                        step_id=tool_step_id,
+                        step_kind="tool_call",
+                        iteration=iteration,
+                        tool_index=tool_idx,
+                        tool=tool_name,
+                        parameters=parameters,
+                        reasoning=tool_reasoning,
+                        message=f"🔧 执行工具: {tool_name}",
+                    )
+
+                    # 兼容旧协议
+                    yield _event(
+                        "tool_execution",
+                        tool=tool_name,
+                        parameters=parameters,
+                        message=f"🔧 执行工具: {tool_name}",
+                        reasoning=tool_reasoning,
+                    )
+
                     result = await _execute_tool(tool_name, parameters)
-                    
-                    # 步骤5: 观察结果
+
                     if result.get("success"):
-                        # 将结果序列化，提供预览内容（避免过长）
                         try:
                             result_json = json.dumps(result["result"], ensure_ascii=False)
                         except Exception:
                             result_json = str(result.get("result"))
+
                         preview = result_json if len(result_json) <= 1200 else (result_json[:1200] + "...")
                         observation = f"工具 {tool_name} 执行成功，结果: {preview}"
-                        yield json.dumps({
-                            "type": "observation",
-                            "tool": tool_name,
-                            "success": True,
-                            "content": f"✅ {tool_name} 执行成功",
-                            "result_preview": preview
-                        }, ensure_ascii=False) + "\n"
+
+                        yield _event(
+                            "step_end",
+                            step_id=tool_step_id,
+                            step_kind="tool_call",
+                            status="success",
+                            content=f"✅ {tool_name} 执行成功",
+                            result_preview=preview,
+                            tool=tool_name,
+                        )
+                        # 兼容旧协议
+                        yield _event(
+                            "observation",
+                            tool=tool_name,
+                            success=True,
+                            content=f"✅ {tool_name} 执行成功",
+                            result_preview=preview,
+                        )
                     else:
-                        error_msg = result.get('error', '未知错误')
+                        error_msg = result.get("error", "未知错误")
                         observation = f"工具 {tool_name} 执行失败: {error_msg}"
-                        yield json.dumps({
-                            "type": "observation", 
-                            "tool": tool_name,
-                            "success": False,
-                            "content": f"❌ {tool_name} 执行失败: {error_msg}",
-                            "error": error_msg
-                        }, ensure_ascii=False) + "\n"
-                        
+
+                        yield _event(
+                            "step_end",
+                            step_id=tool_step_id,
+                            step_kind="tool_call",
+                            status="error",
+                            content=f"❌ {tool_name} 执行失败: {error_msg}",
+                            error=error_msg,
+                            tool=tool_name,
+                        )
+                        # 兼容旧协议
+                        yield _event(
+                            "observation",
+                            tool=tool_name,
+                            success=False,
+                            content=f"❌ {tool_name} 执行失败: {error_msg}",
+                            error=error_msg,
+                        )
+
                     observations += observation + "\n"
                     if tool_name.startswith("fuzzy_search"):
                         used_fuzzy = True
-                
-                # 判断是否需要继续规划
-                if used_fuzzy and iteration < max_iterations:
-                    # 如果执行了模糊搜索，可能需要进一步的精确查询
-                    yield json.dumps({
-                        "type": "agent_replanning",
-                        "message": "🔄 基于搜索结果，重新规划下一步..."
-                    }, ensure_ascii=False) + "\n"
-                    continue
-                else:
-                    # 有了足够信息，生成最终回答
-                    break
-            
-            elif action == "direct_response":
-                # 不直接输出最终回答；进入统一最终生成阶段
-                break
-            
-            else:
-                observations += f"未知行动类型: {action}\n"
-                break
-        
-        # 步骤6: 生成最终回答
-        yield json.dumps({
-            "type": "final_generation",
-            "message": "生成最终回答...",
-            "model": generation_model  # 新增：标注用于最终生成的模型
-        }, ensure_ascii=False) + "\n"
+                    await asyncio.sleep(0)
 
-        # 统一最终生成逻辑：融合大纲/草案/观察结果
-        planner_outline = (plan.get("outline") or [])
+                if used_fuzzy and iteration < max_iterations:
+                    # 兼容旧协议
+                    yield _event("agent_replanning", message="🔄 基于搜索结果，重新规划下一步...")
+                    continue
+                break
+
+            if action == "direct_response":
+                break
+
+            observations += f"未知行动类型: {action}\n"
+            break
+
+        final_step_id = _step_id("final")
+        yield _event(
+            "step_start",
+            step_id=final_step_id,
+            step_kind="final_generation",
+            message="生成最终回答...",
+            model=generation_model,
+        )
+        # 兼容旧协议
+        yield _event("final_generation", message="生成最终回答...", model=generation_model)
+
+        planner_outline = plan.get("outline") or []
         planner_response_hint = plan.get("response", "")
-        # 统一上下文
-        context_parts = [
-            f"用户问题: {user_input}"
-        ]
+        context_parts = [f"用户问题: {user_input}"]
+
         if planner_outline:
             bullets = "\n".join(f"- {item}" for item in planner_outline if item)
             context_parts.append(f"规划器提供的大纲:\n{bullets}")
@@ -466,28 +524,23 @@ async def stream_route_and_respond(user_input: str, history: List[Dict] | None =
             context_parts.append(f"规划器的一句话草案:\n{planner_response_hint}")
         if observations.strip():
             context_parts.append(f"获得的信息（工具/搜索观察）:\n{observations.strip()}")
+
         context_parts.append("请基于以上信息，生成结构清晰、简洁有用的最终回答。若信息不足，请明确说明并给出下一步建议。")
         context = "\n\n".join(context_parts)
 
         messages = [
             SystemMessage(content="你是校园智能助手“云小瞻”。请基于规划大纲与可用信息生成最终回答。允许自由问答，不限于校园领域；除非涉及受限内容，否则不要拒绝。"),
-            HumanMessage(content=context)
+            HumanMessage(content=context),
         ]
         async for chunk in stream_chat_response(messages, temperature=0.5, model_type=generation_model):
             for piece in _split_text(chunk, piece_size=12):
-                yield json.dumps({"type": "content", "text": piece}, ensure_ascii=False) + "\n"
+                yield _event("content", text=piece)
                 await asyncio.sleep(0)
 
-        # 步骤8: 结束标识
-        yield json.dumps({
-            "type": "chain_end",
-            "message": "完成"
-        }, ensure_ascii=False) + "\n"
-        
+        yield _event("step_end", step_id=final_step_id, step_kind="final_generation", status="success")
+        yield _event("chain_end", message="完成")
+
     except Exception as e:
         logger.error(f"Agent循环出错: {e}")
-        yield json.dumps({
-            "type": "error",
-            "message": f"❌ 处理出错: {str(e)}"
-        }, ensure_ascii=False) + "\n"
+        yield _event("error", message=f"❌ 处理出错: {str(e)}")
 
