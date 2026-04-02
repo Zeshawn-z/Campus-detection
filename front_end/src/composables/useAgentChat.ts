@@ -21,10 +21,20 @@ import type { AreaItem, Alert } from '../types'
 
 interface BackendStreamEvent {
   type?: string
+  event_version?: number
   message?: string
   text?: string
   content?: string
+  delta?: string
+  summary?: string
   step?: string
+  step_id?: string
+  step_kind?: string
+  step_title?: string
+  step_status?: string
+  status?: string
+  iteration?: number
+  tool_index?: number
   tool?: string
   parameters?: Record<string, unknown>
   reasoning?: string
@@ -41,6 +51,7 @@ interface MessageRuntimeState {
   planningStepId?: string
   currentToolStepId?: string
   finalActionStepId?: string
+  protocolV2: boolean
   finalStarted: boolean
   finished: boolean
 }
@@ -205,7 +216,7 @@ export function useAgentChat() {
 
   function ensureRuntimeState(messageId: string): MessageRuntimeState {
     if (!runtimeStates.value[messageId]) {
-      runtimeStates.value[messageId] = { finalStarted: false, finished: false }
+      runtimeStates.value[messageId] = { protocolV2: false, finalStarted: false, finished: false }
     }
     return runtimeStates.value[messageId]
   }
@@ -319,11 +330,45 @@ export function useAgentChat() {
     scrollToBottom()
   }
 
+  function normalizeToolStatus(status?: string): ToolCallStatus {
+    if (status === 'error' || status === 'failed') return 'error'
+    if (status === 'calling' || status === 'running') return 'calling'
+    return 'success'
+  }
+
+  function stepKindToType(stepKind?: string): ReActStep['type'] {
+    if (stepKind === 'planning') return 'thought'
+    if (stepKind === 'tool_call') return 'tool_call'
+    if (stepKind === 'tool_result') return 'tool_result'
+    return 'action'
+  }
+
+  function isLegacyAgentEvent(type?: string): boolean {
+    if (!type) return false
+    return [
+      'agent_planning',
+      'agent_replanning',
+      'planning_progress',
+      'thought',
+      'plan',
+      'tool_execution',
+      'observation',
+      'final_generation',
+    ].includes(type)
+  }
+
   function handleBackendEvent(event: BackendStreamEvent, messageId: string) {
     const msg = findMessageById(messageId)
     if (!msg || !event || !event.type) return
 
     const state = ensureRuntimeState(messageId)
+    if (event.type === 'step_start' || event.type === 'step_delta' || event.type === 'step_end') {
+      state.protocolV2 = true
+    }
+
+    if (state.protocolV2 && isLegacyAgentEvent(event.type)) {
+      return
+    }
 
     switch (event.type) {
       case 'chain_start': {
@@ -332,6 +377,146 @@ export function useAgentChat() {
           content: event.message || '正在处理请求...',
           sourceType: event.type,
         })
+        break
+      }
+
+      case 'step_start': {
+        const stepId = event.step_id || uid('step')
+        const stepKind = event.step_kind || ''
+        const stepType = stepKindToType(stepKind)
+
+        if (stepKind === 'planning') {
+          closePlanningStep(msg, state)
+          closeToolStep(msg, state, 'success')
+          const planningStep = appendStep(msg, {
+            id: stepId,
+            type: 'thought',
+            content: '',
+            streaming: true,
+            sourceType: event.type,
+          })
+          state.planningStepId = planningStep.id
+          break
+        }
+
+        if (stepKind === 'tool_call') {
+          closePlanningStep(msg, state)
+          const toolName = event.tool || 'unknown'
+          const reason = event.reasoning ? `\n原因: ${event.reasoning}` : ''
+          const step = appendStep(msg, {
+            id: stepId,
+            type: 'tool_call',
+            content: (event.message || `执行工具: ${toolName}`) + reason,
+            streaming: true,
+            sourceType: event.type,
+            toolCall: {
+              name: toolName,
+              args: event.parameters || {},
+              status: 'calling',
+            },
+          })
+          state.currentToolStepId = step.id
+          break
+        }
+
+        if (stepKind === 'final_generation') {
+          closePlanningStep(msg, state)
+          closeToolStep(msg, state, 'success')
+          const step = appendStep(msg, {
+            id: stepId,
+            type: 'action',
+            content: event.message || '生成最终回答...',
+            streaming: true,
+            sourceType: event.type,
+          })
+          state.finalActionStepId = step.id
+          break
+        }
+
+        appendStep(msg, {
+          id: stepId,
+          type: stepType,
+          content: event.message || event.step_title || '',
+          streaming: true,
+          sourceType: event.type,
+        })
+        break
+      }
+
+      case 'step_delta': {
+        const delta = event.delta || event.content || event.text || ''
+        if (!delta) break
+
+        if (event.step_id) {
+          const exists = msg.steps.some(step => step.id === event.step_id)
+          if (!exists) {
+            appendStep(msg, {
+              id: event.step_id,
+              type: stepKindToType(event.step_kind),
+              content: '',
+              streaming: true,
+              sourceType: event.type,
+            })
+          }
+          appendStepContent(msg, event.step_id, delta)
+          setStepStreaming(msg, event.step_id, true)
+        } else if (state.planningStepId) {
+          appendStepContent(msg, state.planningStepId, delta)
+          setStepStreaming(msg, state.planningStepId, true)
+        }
+        break
+      }
+
+      case 'step_end': {
+        const stepId = event.step_id
+        if (!stepId) break
+
+        const endedStep = msg.steps.find(step => step.id === stepId)
+        const endStatus = event.status || event.step_status || (event.success === false ? 'error' : 'success')
+
+        if (endedStep?.type === 'thought') {
+          const summaryText = toText(event.summary || event.message || '')
+          updateStep(msg, stepId, step => ({
+            ...step,
+            content: step.content?.trim() ? step.content : summaryText,
+            streaming: false,
+          }))
+          if (state.planningStepId === stepId) {
+            state.planningStepId = undefined
+          }
+          break
+        }
+
+        if (endedStep?.type === 'tool_call') {
+          const status = normalizeToolStatus(endStatus)
+          setToolStatus(msg, stepId, status)
+          setStepStreaming(msg, stepId, false)
+
+          if (state.currentToolStepId === stepId) {
+            state.currentToolStepId = undefined
+          }
+
+          const hasObservation = event.result_preview || event.error || event.content
+          if (hasObservation) {
+            const observationEvent: BackendStreamEvent = {
+              success: status !== 'error',
+              content: event.content,
+              result_preview: event.result_preview,
+              error: event.error,
+            }
+            appendStep(msg, {
+              type: 'tool_result',
+              content: formatObservation(observationEvent),
+              sourceType: 'step_end',
+            })
+          }
+          break
+        }
+
+        setStepStreaming(msg, stepId, false)
+        if (state.finalActionStepId === stepId) {
+          state.finalActionStepId = undefined
+        }
         break
       }
 
@@ -675,7 +860,7 @@ export function useAgentChat() {
     session.messages.push(assistantMsg)
 
     finalStartedMap.value[assistantMsg.id] = false
-    runtimeStates.value[assistantMsg.id] = { finalStarted: false, finished: false }
+    runtimeStates.value[assistantMsg.id] = { protocolV2: false, finalStarted: false, finished: false }
 
     isGenerating.value = true
     scrollToBottom()
