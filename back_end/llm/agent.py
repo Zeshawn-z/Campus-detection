@@ -11,6 +11,12 @@ from .chains import stream_route_and_respond
 logger = logging.getLogger('django.llm.agent')
 
 
+def _split_text(text: str, piece_size: int = 12) -> List[str]:
+    if not text:
+        return []
+    return [text[i:i + piece_size] for i in range(0, len(text), piece_size)]
+
+
 def _normalize_history(history: Optional[List[Dict]]) -> List[BaseMessage]:
     """
     将前端传入的聊天历史规范化为LangChain的消息对象列表。
@@ -70,17 +76,10 @@ async def get_agent_response(
             }, ensure_ascii=False) + "\n"
             await asyncio.sleep(0)
 
-            _buf = ""
-            _FLUSH_SIZE = 40
             async for chunk in stream_chat_response(msg_list, temperature=temperature, model_type=(model_type or "fast")):
-                _buf += chunk
-                if len(_buf) >= _FLUSH_SIZE or '\n' in _buf:
-                    yield json.dumps({"type": "content", "text": _buf}, ensure_ascii=False) + "\n"
+                for piece in _split_text(chunk, piece_size=12):
+                    yield json.dumps({"type": "content", "text": piece}, ensure_ascii=False) + "\n"
                     await asyncio.sleep(0)
-                    _buf = ""
-            if _buf:
-                yield json.dumps({"type": "content", "text": _buf}, ensure_ascii=False) + "\n"
-                await asyncio.sleep(0)
 
             yield json.dumps({"type": "chain_end", "message": "✅ 处理完成"}, ensure_ascii=False) + "\n"
             await asyncio.sleep(0)

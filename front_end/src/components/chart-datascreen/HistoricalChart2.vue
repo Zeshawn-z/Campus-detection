@@ -79,8 +79,8 @@ const fetchHistoricalData = async (areaId: number, hours = 24) => {
       // 尝试使用通用历史数据服务
       try {
         const data = await historicalService.getHistoricalByDateRange(
-          startTime.toISOString().split('T')[0],
-          endTime.toISOString().split('T')[0],
+          startTime.toISOString(),
+          endTime.toISOString(),
           { area_id: areaId }
         )
         
