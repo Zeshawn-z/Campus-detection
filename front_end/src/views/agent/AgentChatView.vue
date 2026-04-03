@@ -6,7 +6,7 @@
           <div class="sidebar-logo">
             <el-icon :size="18" color="#fff"><Monitor /></el-icon>
           </div>
-          <span v-if="!sidebarCollapsed" class="sidebar-title">慧感云瞻</span>
+          <span v-if="!sidebarCollapsed" class="sidebar-title">云小瞻</span>
         </div>
         <el-button
           v-if="!sidebarCollapsed"
@@ -60,13 +60,29 @@
       </div>
     </aside>
 
+    <div
+      v-if="isMobile && !sidebarCollapsed"
+      class="chat-sidebar-backdrop"
+      @click="collapseSidebar"
+    ></div>
+
+    <el-button
+      v-if="isMobile"
+      :icon="sidebarCollapsed ? Expand : Fold"
+      class="mobile-sidebar-toggle"
+      circle
+      size="small"
+      @click="toggleSidebar"
+    />
+
     <main class="chat-main">
       <header class="chat-header">
         <el-button
+          v-if="!isMobile"
           :icon="sidebarCollapsed ? Expand : Fold"
           text
           size="small"
-          @click="sidebarCollapsed = !sidebarCollapsed"
+          @click="toggleSidebar"
         />
         <span class="chat-header-title">{{ currentSession?.title || '新对话' }}</span>
         <div class="chat-header-right">
@@ -85,36 +101,19 @@
             <div class="welcome-icon-ring"></div>
             <el-icon :size="48" color="#409eff"><Monitor /></el-icon>
           </div>
-          <h2 class="welcome-title">慧感云瞻智能助手</h2>
-          <p class="welcome-desc">基于校园实时数据与 ReAct 框架，支持工具调用、逐步推理与流式回复</p>
+          <h2 class="welcome-title">云小瞻智能体</h2>
+          <p class="welcome-desc">校园数据分析、趋势研判、告警诊断与资源导航，一次对话内完成规划与执行</p>
 
+          <div class="quick-prompts-head">
+            <span class="quick-prompts-title">试试这些问题</span>
+            <button class="quick-prompts-refresh" type="button" @click="refreshQuickPrompts">换一批</button>
+          </div>
           <div class="quick-prompts">
-            <div class="quick-prompt" @click="sendQuickPrompt('推荐3个当前人少的自习区域')">
-              <el-icon :size="18" color="#409eff"><OfficeBuilding /></el-icon>
+            <div v-for="prompt in quickPrompts" :key="prompt.question" class="quick-prompt" @click="sendQuickPrompt(prompt.question)">
+              <el-icon :size="18" :color="prompt.color"><component :is="prompt.icon" /></el-icon>
               <div class="quick-prompt-text">
-                <strong>推荐空闲区域</strong>
-                <span>按人流与容量推荐可用地点</span>
-              </div>
-            </div>
-            <div class="quick-prompt" @click="sendQuickPrompt('查询正心11最近24小时人流趋势')">
-              <el-icon :size="18" color="#67c23a"><DataLine /></el-icon>
-              <div class="quick-prompt-text">
-                <strong>趋势分析</strong>
-                <span>查看区域历史变化与极值</span>
-              </div>
-            </div>
-            <div class="quick-prompt" @click="sendQuickPrompt('查询终端2当前运行状态')">
-              <el-icon :size="18" color="#e6a23c"><SetUp /></el-icon>
-              <div class="quick-prompt-text">
-                <strong>终端状态诊断</strong>
-                <span>查看 CPU、内存和模型状态</span>
-              </div>
-            </div>
-            <div class="quick-prompt" @click="sendQuickPrompt('给我图书馆相关服务入口')">
-              <el-icon :size="18" color="#909399"><Link /></el-icon>
-              <div class="quick-prompt-text">
-                <strong>资源导航</strong>
-                <span>检索校内服务与链接</span>
+                <strong>{{ prompt.title }}</strong>
+                <span>{{ prompt.subtitle }}</span>
               </div>
             </div>
           </div>
@@ -144,12 +143,8 @@
                 <div
                   v-if="showFinalAnswer(turn.assistant)"
                   class="message-assistant-content"
-                  :class="{ 'message-assistant-content--streaming': turn.assistant.streaming }"
                 >
-                  <MarkdownRender :content="turn.assistant.content" />
-                  <span v-if="turn.assistant.streaming && turn.assistant.content" class="streaming-breath">
-                    <span></span>
-                  </span>
+                  <MarkdownRender :content="turn.assistant.content" :streaming="turn.assistant.streaming" />
                 </div>
               </div>
             </div>
@@ -215,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onBeforeUnmount, onMounted, computed, ref } from 'vue'
 import { useAgentChat } from '../../composables/useAgentChat'
 import ReActSteps from './ReActSteps.vue'
 import MarkdownRender from './MarkdownRender.vue'
@@ -225,6 +220,77 @@ import {
   OfficeBuilding, DataLine, SetUp, Link,
   DataAnalysis, Bell, Document, Loading,
 } from '@element-plus/icons-vue'
+
+type QuickPrompt = {
+  title: string
+  subtitle: string
+  question: string
+  color: string
+  icon: any
+}
+
+const quickPromptPool: QuickPrompt[] = [
+  {
+    title: '找自习位',
+    subtitle: '按人数与容量推荐安静区域',
+    question: '推荐3个当前人数少于10人的自习区域，并说明理由',
+    color: '#2f80ed',
+    icon: OfficeBuilding,
+  },
+  {
+    title: '高峰时段分析',
+    subtitle: '查看区域近24小时变化',
+    question: '分析正心11近24小时人流趋势，并给出高峰和低峰时段',
+    color: '#31a66a',
+    icon: DataLine,
+  },
+  {
+    title: '终端诊断',
+    subtitle: '定位设备运行异常',
+    question: '查询终端2当前运行状态，判断是否存在异常并给出处理建议',
+    color: '#d0912f',
+    icon: SetUp,
+  },
+  {
+    title: '告警研判',
+    subtitle: '快速判断告警优先级',
+    question: '请分析最近未处理告警，按优先级排序并给出处置建议',
+    color: '#d54f5d',
+    icon: Bell,
+  },
+  {
+    title: '空间推荐',
+    subtitle: '按场景选择楼宇与区域',
+    question: '我想小组讨论，推荐3个合适区域并比较优缺点',
+    color: '#5e7ce2',
+    icon: DataAnalysis,
+  },
+  {
+    title: '公告草拟',
+    subtitle: '根据实时状态生成通知',
+    question: '基于当前人流和告警状态，帮我起草一条面向师生的管理公告',
+    color: '#7d5cc6',
+    icon: Document,
+  },
+  {
+    title: '资源导航',
+    subtitle: '检索校园服务入口',
+    question: '给我图书馆、自习室和后勤服务的入口链接',
+    color: '#5f6b7f',
+    icon: Link,
+  },
+  {
+    title: '容量评估',
+    subtitle: '判断区域承载与拥挤风险',
+    question: '对比致知11和正心13当前负载，判断哪个更适合立即前往',
+    color: '#2b9e8a',
+    icon: Monitor,
+  },
+]
+
+const quickPrompts = ref<QuickPrompt[]>([])
+const isMobile = ref(false)
+let wasMobile = false
 
 const {
   sessions, currentSessionId, currentSession, currentMessages,
@@ -242,6 +308,35 @@ function getAppIcon(appId: string) {
   if (appId === 'alert-analysis') return Bell
   if (appId === 'generate-notice') return Document
   return Monitor
+}
+
+function refreshQuickPrompts() {
+  const count = Math.min(4, quickPromptPool.length)
+  const shuffled = [...quickPromptPool]
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = shuffled[i]
+    shuffled[i] = shuffled[j]
+    shuffled[j] = tmp
+  }
+  quickPrompts.value = shuffled.slice(0, count)
+}
+
+function syncResponsiveSidebar() {
+  const mobile = window.innerWidth <= 768
+  isMobile.value = mobile
+  if (mobile && !wasMobile) {
+    sidebarCollapsed.value = true
+  }
+  wasMobile = mobile
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function collapseSidebar() {
+  sidebarCollapsed.value = true
 }
 
 const messageTurns = computed(() => {
@@ -268,16 +363,29 @@ const messageTurns = computed(() => {
   return turns
 })
 
-onMounted(init)
+onMounted(async () => {
+  await init()
+  refreshQuickPrompts()
+  syncResponsiveSidebar()
+  window.addEventListener('resize', syncResponsiveSidebar)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncResponsiveSidebar)
+})
 </script>
 
 <style scoped>
 .agent-chat {
   display: flex;
+  position: relative;
   height: calc(100dvh - 72px);
   min-height: 0;
   margin: 0;
-  background: #f7f8fa;
+  background:
+    radial-gradient(1000px 420px at -8% -20%, rgba(37, 114, 255, 0.18), transparent 58%),
+    radial-gradient(760px 300px at 112% 10%, rgba(38, 184, 134, 0.12), transparent 62%),
+    linear-gradient(180deg, #f4f8ff 0%, #f7f9fc 42%, #f9fbff 100%);
   overflow: hidden;
 }
 
@@ -432,7 +540,21 @@ onMounted(init)
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.96);
+  position: relative;
+  z-index: 1;
+}
+
+.chat-sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(1px);
+  z-index: 9;
+}
+
+.mobile-sidebar-toggle {
+  display: none;
 }
 .chat-header {
   display: flex;
@@ -477,10 +599,43 @@ onMounted(init)
   inset: -12px;
   border-radius: 50%;
   background: linear-gradient(135deg, rgba(64,158,255,0.15), rgba(44,111,187,0.05));
-  animation: ring-pulse 3s ease-in-out infinite;
+  opacity: 0.7;
 }
 .welcome-title { font-size: 24px; font-weight: 700; color: #303133; margin-bottom: 8px; }
 .welcome-desc { font-size: 14px; color: #909399; margin-bottom: 36px; text-align: center; }
+
+.quick-prompts-head {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.quick-prompts-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #60708f;
+  letter-spacing: 0.02em;
+}
+
+.quick-prompts-refresh {
+  border: 1px solid #c8d6ec;
+  background: #f5f9ff;
+  color: #4e6f9d;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 10px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.quick-prompts-refresh:hover {
+  border-color: #9bb7e2;
+  color: #375f98;
+  background: #eef5ff;
+}
 
 .quick-prompts {
   display: grid;
@@ -497,13 +652,13 @@ onMounted(init)
   border-radius: 12px;
   border: 1px solid #ebeef5;
   cursor: pointer;
-  transition: all 0.2s;
-  background: #fafbfc;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  background: linear-gradient(180deg, #fcfdff 0%, #f7faff 100%);
 }
 .quick-prompt:hover {
-  border-color: #409eff;
-  box-shadow: 0 2px 12px rgba(64,158,255,0.1);
-  transform: translateY(-1px);
+  border-color: #8fb6ea;
+  box-shadow: 0 6px 18px rgba(84, 125, 184, 0.12);
+  background: linear-gradient(180deg, #fafdff 0%, #f3f8ff 100%);
 }
 .quick-prompt-text { display: flex; flex-direction: column; gap: 2px; }
 .quick-prompt-text strong { font-size: 13px; color: #303133; font-weight: 600; }
@@ -565,35 +720,6 @@ onMounted(init)
   line-height: 1.7;
   color: #303133;
   padding: 4px 0;
-}
-
-.message-assistant-content--streaming :deep(.markdown-render) {
-  display: inline;
-}
-.message-assistant-content--streaming :deep(.markdown-render > *) {
-  display: inline;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: inherit;
-}
-
-.streaming-breath {
-  display: inline-block;
-  margin-left: 2px;
-  vertical-align: middle;
-  line-height: 1;
-}
-.streaming-breath span {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #409eff;
-  animation: breathe 1.4s ease-in-out infinite;
 }
 
 .chat-input-area {
@@ -688,15 +814,6 @@ onMounted(init)
   white-space: nowrap;
 }
 
-@keyframes breathe {
-  0%, 100% { opacity: 0.25; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.2); }
-}
-@keyframes ring-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.6; }
-  50% { transform: scale(1.1); opacity: 0.3; }
-}
-
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -714,6 +831,17 @@ onMounted(init)
     box-shadow: 2px 0 12px rgba(0,0,0,0.1);
   }
   .chat-sidebar--collapsed { width: 0; }
+  .mobile-sidebar-toggle {
+    display: inline-flex;
+    position: absolute;
+    left: 12px;
+    top: 10px;
+    z-index: 20;
+    box-shadow: 0 4px 14px rgba(17, 24, 39, 0.18);
+  }
+  .quick-prompts-head {
+    max-width: 100%;
+  }
   .quick-prompts { grid-template-columns: 1fr; }
   .message-user-bubble { max-width: 85%; }
   .model-hint-row {

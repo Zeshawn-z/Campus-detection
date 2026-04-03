@@ -36,12 +36,6 @@
           <span v-else-if="step.toolCall.status === 'error'" class="status-error">x</span>
         </span>
 
-        <span
-          v-if="step.streaming && !(step.type === 'tool_call' && step.toolCall?.status === 'calling')"
-          class="breathing-dots"
-        >
-          <span></span><span></span><span></span>
-        </span>
       </div>
 
       <div class="react-step__collapse" :data-open="!isCollapsed(step.id)">
@@ -53,52 +47,67 @@
           </div>
 
           <div class="react-step__content">
-            <template v-if="hasParsedJson(step.content)">
+            <template v-if="isProgressivePlanStep(step)">
               <div
-                v-if="getParsedJson(step.content)?.leading"
+                v-if="getStepProgressiveLeading(step)"
                 class="json-leading"
-                v-html="renderText(getParsedJson(step.content)?.leading || '')"
+                v-html="renderText(getStepProgressiveLeading(step))"
               ></div>
 
-              <div v-if="isPlanData(getParsedJson(step.content)?.data)" class="json-plan">
-                <div v-if="getParsedJson(step.content)?.data?.reasoning" class="json-line">
+              <div class="json-plan">
+                <div v-if="getStepPlanReasoning(step)" class="json-line" :class="{ 'json-line--optimistic': isStepPlanReasoningOptimistic(step) }">
                   <span class="json-key">思考</span>
-                  <span class="json-val">{{ getParsedJson(step.content)?.data?.reasoning }}</span>
+                  <span class="json-val">
+                    <StreamFadeText :text="getStepPlanReasoning(step)" :streaming="step.streaming" />
+                  </span>
                 </div>
 
-                <div v-if="getParsedJson(step.content)?.data?.action" class="json-line">
+                <div v-if="getStepPlanAction(step)" class="json-line" :class="{ 'json-line--optimistic': isStepPlanActionOptimistic(step) }">
                   <span class="json-key">行动</span>
-                  <span class="json-val">{{ getParsedJson(step.content)?.data?.action }}</span>
+                  <span class="json-val">
+                    <StreamFadeText :text="getStepPlanAction(step)" :streaming="step.streaming" />
+                  </span>
                 </div>
 
                 <div
-                  v-if="Array.isArray(getParsedJson(step.content)?.data?.outline) && getParsedJson(step.content)?.data?.outline?.length"
+                  v-if="getStepPlanOutline(step).length"
                   class="json-list-block"
                 >
                   <div class="json-key">回答大纲</div>
                   <ul class="json-list">
-                    <li v-for="(item, idx) in getParsedJson(step.content)?.data?.outline" :key="`outline_${idx}`">{{ item }}</li>
+                    <li
+                      v-for="(item, idx) in getStepPlanOutline(step)"
+                      :key="`outline_p_${idx}`"
+                      :class="{ 'json-item--optimistic': isStepPlanOutlineOptimistic(step) }"
+                    >
+                      <StreamFadeText :text="item" :streaming="step.streaming" />
+                    </li>
                   </ul>
                 </div>
 
                 <div
-                  v-if="Array.isArray(getParsedJson(step.content)?.data?.tool_calls) && getParsedJson(step.content)?.data?.tool_calls?.length"
+                  v-if="getStepPlanToolCalls(step).length"
                   class="json-list-block"
                 >
                   <div class="json-key">计划调用工具</div>
                   <ul class="json-list">
                     <li
-                      v-for="(call, idx) in getParsedJson(step.content)?.data?.tool_calls"
-                      :key="`tool_call_${idx}`"
+                      v-for="(call, idx) in getStepPlanToolCalls(step)"
+                      :key="`tool_call_p_${idx}`"
                       class="json-tool-item"
+                      :class="{ 'json-item--optimistic': isStepPlanToolCallsOptimistic(step) }"
                     >
                       <div class="json-line">
                         <span class="json-key">工具</span>
-                        <span class="json-val">{{ call?.tool || call?.name || 'unknown' }}</span>
+                        <span class="json-val">
+                          <StreamFadeText :text="String(call?.tool || call?.name || 'unknown')" :streaming="step.streaming" />
+                        </span>
                       </div>
                       <div v-if="call?.reasoning" class="json-line">
                         <span class="json-key">原因</span>
-                        <span class="json-val">{{ call.reasoning }}</span>
+                        <span class="json-val">
+                          <StreamFadeText :text="String(call.reasoning || '')" :streaming="step.streaming" />
+                        </span>
                       </div>
                       <div v-if="call?.parameters" class="json-line json-line-block">
                         <span class="json-key">参数</span>
@@ -109,9 +118,77 @@
                 </div>
               </div>
 
-              <div v-else-if="Array.isArray(getParsedJson(step.content)?.data)" class="json-array">
+            </template>
+
+            <template v-else-if="isJsonStep(step)">
+              <div
+                v-if="getStepParsedLeading(step)"
+                class="json-leading"
+                v-html="renderText(getStepParsedLeading(step))"
+              ></div>
+
+              <div v-if="isPlanData(getStepParsedData(step))" class="json-plan">
+                <div v-if="(getStepParsedData(step) as any)?.reasoning" class="json-line">
+                  <span class="json-key">思考</span>
+                  <span class="json-val">
+                    <StreamFadeText :text="String((getStepParsedData(step) as any)?.reasoning || '')" :streaming="step.streaming" />
+                  </span>
+                </div>
+
+                <div v-if="(getStepParsedData(step) as any)?.action" class="json-line">
+                  <span class="json-key">行动</span>
+                  <span class="json-val">
+                    <StreamFadeText :text="String((getStepParsedData(step) as any)?.action || '')" :streaming="step.streaming" />
+                  </span>
+                </div>
+
                 <div
-                  v-for="(item, idx) in getParsedJson(step.content)?.data"
+                  v-if="getStepParsedOutline(step).length"
+                  class="json-list-block"
+                >
+                  <div class="json-key">回答大纲</div>
+                  <ul class="json-list">
+                    <li v-for="(item, idx) in getStepParsedOutline(step)" :key="`outline_${idx}`">
+                      <StreamFadeText :text="item" :streaming="step.streaming" />
+                    </li>
+                  </ul>
+                </div>
+
+                <div
+                  v-if="getStepParsedToolCalls(step).length"
+                  class="json-list-block"
+                >
+                  <div class="json-key">计划调用工具</div>
+                  <ul class="json-list">
+                    <li
+                      v-for="(call, idx) in getStepParsedToolCalls(step)"
+                      :key="`tool_call_${idx}`"
+                      class="json-tool-item"
+                    >
+                      <div class="json-line">
+                        <span class="json-key">工具</span>
+                        <span class="json-val">
+                          <StreamFadeText :text="String(call?.tool || call?.name || 'unknown')" :streaming="step.streaming" />
+                        </span>
+                      </div>
+                      <div v-if="call?.reasoning" class="json-line">
+                        <span class="json-key">原因</span>
+                        <span class="json-val">
+                          <StreamFadeText :text="String(call.reasoning || '')" :streaming="step.streaming" />
+                        </span>
+                      </div>
+                      <div v-if="call?.parameters" class="json-line json-line-block">
+                        <span class="json-key">参数</span>
+                        <pre class="json-pre">{{ JSON.stringify(call.parameters, null, 2) }}</pre>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div v-else-if="getStepParsedArray(step)" class="json-array">
+                <div
+                  v-for="(item, idx) in getStepParsedArray(step)"
                   :key="`arr_${idx}`"
                   class="json-card"
                 >
@@ -122,29 +199,35 @@
                     </div>
                   </template>
                   <template v-else>
-                    <span class="json-val">{{ formatValue(item) }}</span>
+                    <span class="json-val">
+                      <StreamFadeText :text="formatValue(item)" :streaming="step.streaming" />
+                    </span>
                   </template>
                 </div>
               </div>
 
-              <div v-else-if="isRecord(getParsedJson(step.content)?.data)" class="json-object">
+              <div v-else-if="getStepParsedObject(step)" class="json-object">
                 <div
-                  v-for="(val, key) in getParsedJson(step.content)?.data"
+                  v-for="(val, key) in (getStepParsedObject(step) || {})"
                   :key="`obj_${String(key)}`"
                   class="json-line"
                 >
                   <span class="json-key">{{ String(key) }}</span>
-                  <span class="json-val">{{ formatValue(val) }}</span>
+                  <span class="json-val">
+                    <StreamFadeText :text="formatValue(val)" :streaming="step.streaming" />
+                  </span>
                 </div>
               </div>
 
               <div v-else class="json-line">
-                <span class="json-val">{{ formatValue(getParsedJson(step.content)?.data) }}</span>
+                <span class="json-val">
+                  <StreamFadeText :text="formatValue(getStepParsedData(step))" :streaming="step.streaming" />
+                </span>
               </div>
             </template>
 
             <template v-else>
-              <span v-html="renderText(step.content)"></span>
+              <StreamFadeText :text="step.content" :streaming="step.streaming" />
             </template>
           </div>
 
@@ -164,6 +247,8 @@
 import { ref, watch } from 'vue'
 import { CircleCheck } from '@element-plus/icons-vue'
 import type { ReActStep } from '../../types/agent-chat'
+import { createStepJsonParser } from './stepJsonParser'
+import StreamFadeText from './StreamFadeText.vue'
 
 const props = defineProps<{
   steps: ReActStep[]
@@ -275,65 +360,96 @@ function renderText(text: string): string {
     .replace(/\n/g, '<br>')
 }
 
-type ParsedJsonPayload = {
-  leading: string
-  data: any
+const stepParser = createStepJsonParser()
+
+function getStepRenderState(step: ReActStep) {
+  return stepParser.getStepRenderState(step)
 }
 
-const jsonCache = new Map<string, ParsedJsonPayload | null>()
-
-function tryParseJson(text: string): any | null {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
+function isProgressivePlanStep(step: ReActStep): boolean {
+  return getStepRenderState(step).mode === 'progressive'
 }
 
-function getParsedJson(content: string): ParsedJsonPayload | null {
-  if (!content) return null
-  if (jsonCache.has(content)) return jsonCache.get(content) || null
-
-  let parsed: ParsedJsonPayload | null = null
-  const trimmed = content.trim()
-  if (!trimmed) {
-    jsonCache.set(content, null)
-    return null
-  }
-
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    const whole = tryParseJson(trimmed)
-    if (whole !== null) {
-      parsed = { leading: '', data: whole }
-    }
-  }
-
-  if (!parsed) {
-    const braceIdx = content.indexOf('{')
-    const bracketIdx = content.indexOf('[')
-    let idx = -1
-    if (braceIdx >= 0 && bracketIdx >= 0) idx = Math.min(braceIdx, bracketIdx)
-    else idx = Math.max(braceIdx, bracketIdx)
-
-    if (idx >= 0) {
-      const leading = content.slice(0, idx).trim()
-      const candidate = content.slice(idx).trim()
-      const tail = tryParseJson(candidate)
-      if (tail !== null) {
-        parsed = { leading, data: tail }
-      }
-    }
-  }
-
-  if (jsonCache.size > 300) {
-    jsonCache.clear()
-  }
-  jsonCache.set(content, parsed)
-  return parsed
+function isJsonStep(step: ReActStep): boolean {
+  return getStepRenderState(step).mode === 'json'
 }
 
-function hasParsedJson(content: string): boolean {
-  return !!getParsedJson(content)
+function getStepProgressive(step: ReActStep) {
+  const state = getStepRenderState(step)
+  return state.mode === 'progressive' ? state.progressive || null : null
+}
+
+function getStepProgressiveLeading(step: ReActStep): string {
+  return getStepProgressive(step)?.leading || ''
+}
+
+function getStepPlanReasoning(step: ReActStep): string {
+  return stepParser.getPlanTextField(getStepProgressive(step), 'reasoning')
+}
+
+function getStepPlanAction(step: ReActStep): string {
+  return stepParser.getPlanTextField(getStepProgressive(step), 'action')
+}
+
+function getStepPlanOutline(step: ReActStep): string[] {
+  return stepParser.getPlanOutline(getStepProgressive(step))
+}
+
+function getStepPlanToolCalls(step: ReActStep): Array<Record<string, any>> {
+  return stepParser.getPlanToolCalls(getStepProgressive(step))
+}
+
+function isStepPlanReasoningOptimistic(step: ReActStep): boolean {
+  return stepParser.isOptimisticField(getStepProgressive(step), 'reasoning')
+}
+
+function isStepPlanActionOptimistic(step: ReActStep): boolean {
+  return stepParser.isOptimisticField(getStepProgressive(step), 'action')
+}
+
+function isStepPlanOutlineOptimistic(step: ReActStep): boolean {
+  return stepParser.isOptimisticField(getStepProgressive(step), 'outline')
+}
+
+function isStepPlanToolCallsOptimistic(step: ReActStep): boolean {
+  return stepParser.isOptimisticField(getStepProgressive(step), 'tool_calls')
+}
+
+function getStepParsed(step: ReActStep) {
+  const state = getStepRenderState(step)
+  return state.mode === 'json' ? state.parsed || null : null
+}
+
+function getStepParsedLeading(step: ReActStep): string {
+  return getStepParsed(step)?.leading || ''
+}
+
+function getStepParsedData(step: ReActStep): unknown {
+  return getStepParsed(step)?.data
+}
+
+function getStepParsedOutline(step: ReActStep): string[] {
+  const data = getStepParsedData(step) as Record<string, unknown> | undefined
+  const outline = data?.outline
+  if (!Array.isArray(outline)) return []
+  return outline.map(item => String(item ?? ''))
+}
+
+function getStepParsedToolCalls(step: ReActStep): Array<Record<string, any>> {
+  const data = getStepParsedData(step) as Record<string, unknown> | undefined
+  const calls = data?.tool_calls
+  if (!Array.isArray(calls)) return []
+  return calls.filter(item => !!item && typeof item === 'object') as Array<Record<string, any>>
+}
+
+function getStepParsedArray(step: ReActStep): unknown[] | null {
+  const data = getStepParsedData(step)
+  return Array.isArray(data) ? data : null
+}
+
+function getStepParsedObject(step: ReActStep): Record<string, unknown> | null {
+  const data = getStepParsedData(step)
+  return isRecord(data) ? data : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -525,6 +641,10 @@ function formatValue(value: unknown): string {
   word-break: break-word;
 }
 
+.react-step__content-fade {
+  display: block;
+}
+
 .react-step__content :deep(strong) {
   color: #b8b8c0;
   font-weight: 600;
@@ -562,6 +682,15 @@ function formatValue(value: unknown): string {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.json-line--optimistic .json-val {
+  color: #6f7d95;
+  font-style: italic;
+}
+
+.json-item--optimistic {
+  color: #6f7d95;
 }
 
 .json-line-block {

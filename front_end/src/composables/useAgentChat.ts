@@ -138,6 +138,67 @@ export function useAgentChat() {
   ])
 
   let abortController: AbortController | null = null
+  let scrollScheduled = false
+  let stepDeltaFlushScheduled = false
+  let contentFlushScheduled = false
+  const pendingStepDeltas = new Map<string, { messageId: string; delta: string }>()
+  const pendingContents = new Map<string, string>()
+
+  function flushPendingStepDeltas() {
+    if (pendingStepDeltas.size === 0) return
+    for (const [stepId, payload] of pendingStepDeltas.entries()) {
+      const msg = findMessageById(payload.messageId)
+      if (!msg) continue
+      appendStepContent(msg, stepId, payload.delta)
+      setStepStreaming(msg, stepId, true)
+    }
+    pendingStepDeltas.clear()
+  }
+
+  function flushPendingContents() {
+    if (pendingContents.size === 0) return
+    for (const [messageId, delta] of pendingContents.entries()) {
+      const msg = findMessageById(messageId)
+      if (!msg) continue
+      msg.content += delta
+    }
+    pendingContents.clear()
+  }
+
+  function queueStepDelta(messageId: string, stepId: string, delta: string) {
+    if (!delta) return
+    const prev = pendingStepDeltas.get(stepId)
+    if (prev) {
+      pendingStepDeltas.set(stepId, {
+        messageId,
+        delta: prev.delta + delta,
+      })
+    } else {
+      pendingStepDeltas.set(stepId, { messageId, delta })
+    }
+
+    if (stepDeltaFlushScheduled) return
+    stepDeltaFlushScheduled = true
+    requestAnimationFrame(() => {
+      flushPendingStepDeltas()
+      stepDeltaFlushScheduled = false
+      scrollToBottom()
+    })
+  }
+
+  function queueContentDelta(messageId: string, delta: string) {
+    if (!delta) return
+    const prev = pendingContents.get(messageId) || ''
+    pendingContents.set(messageId, prev + delta)
+
+    if (contentFlushScheduled) return
+    contentFlushScheduled = true
+    requestAnimationFrame(() => {
+      flushPendingContents()
+      contentFlushScheduled = false
+      scrollToBottom()
+    })
+  }
 
   function createSession(title = '新对话'): ChatSession {
     const session: ChatSession = {
@@ -315,6 +376,9 @@ export function useAgentChat() {
   }
 
   function markFinished(messageId: string) {
+    flushPendingStepDeltas()
+    flushPendingContents()
+
     const msg = findMessageById(messageId)
     if (!msg) return
     const state = ensureRuntimeState(messageId)
@@ -458,11 +522,9 @@ export function useAgentChat() {
               sourceType: event.type,
             })
           }
-          appendStepContent(msg, event.step_id, delta)
-          setStepStreaming(msg, event.step_id, true)
+          queueStepDelta(messageId, event.step_id, delta)
         } else if (state.planningStepId) {
-          appendStepContent(msg, state.planningStepId, delta)
-          setStepStreaming(msg, state.planningStepId, true)
+          queueStepDelta(messageId, state.planningStepId, delta)
         }
         break
       }
@@ -630,7 +692,7 @@ export function useAgentChat() {
           finalStartedMap.value[msg.id] = true
           setStepStreaming(msg, state.finalActionStepId, false)
         }
-        msg.content += event.text || ''
+        queueContentDelta(messageId, event.text || '')
         break
       }
 
@@ -887,11 +949,16 @@ export function useAgentChat() {
   }
 
   function scrollToBottom() {
+    if (scrollScheduled) return
+    scrollScheduled = true
     nextTick(() => {
-      const el = scrollRef.value
-      if (el) {
-        el.scrollTop = el.scrollHeight
-      }
+      requestAnimationFrame(() => {
+        const el = scrollRef.value
+        if (el) {
+          el.scrollTop = el.scrollHeight
+        }
+        scrollScheduled = false
+      })
     })
   }
 
