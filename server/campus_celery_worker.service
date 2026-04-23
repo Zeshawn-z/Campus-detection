@@ -4,16 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStartPre=/bin/mkdir -p /run/celery
-ExecStartPre=/bin/mkdir -p /var/log/celery
-ExecStartPre=/bin/chown -R www-data:www-data /run/celery
-ExecStartPre=/bin/chown -R www-data:www-data /var/log/celery
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/Campus-detection/back_end
+RuntimeDirectory=celery-worker
+RuntimeDirectoryMode=0755
+LogsDirectory=celery-worker
+LogsDirectoryMode=0755
 Environment=DJANGO_SETTINGS_MODULE=campus_detection.settings
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/var/www/Campus-detection/back_end/venv/bin/celery -A campus_detection worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat --prefetch-multiplier=1 --max-tasks-per-child=50 --loglevel=INFO --pidfile=/run/celery/worker.pid --logfile=/var/log/celery/worker.log
+ExecStart=/var/www/Campus-detection/back_end/venv/bin/celery -A campus_detection worker --pool=solo --concurrency=1 --without-gossip --without-mingle --without-heartbeat --prefetch-multiplier=1 --max-tasks-per-child=50 --loglevel=INFO --pidfile=/run/celery-worker/worker.pid --logfile=/var/log/celery-worker/worker.log
 Restart=always
 RestartSec=5
 CPUQuota=35%
